@@ -33,6 +33,8 @@ npm run validate:interactions
 npm run build
 ```
 
+`npm run build` produces the Sites/Cloudflare Worker bundle. Vercel reads `vercel.json` and runs `next build --webpack` against the same App Router source. Add `OPENAI_API_KEY` as a Vercel server-side environment secret to enable arbitrary live atlas generation there.
+
 ## Product modes
 
 - **Generated atlas:** web research with cited first-party or authoritative sources, 6–14 major component records, an AI-generated assembled reference image, system filters, component search, and explosion control.
