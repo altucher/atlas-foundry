@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 
 import type { AtlasPart, AtlasSource, FoundryAtlas } from '@/app/foundry-data';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
+export const maxDuration = 300;
 
 const defaultResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
