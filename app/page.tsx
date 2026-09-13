@@ -1,371 +1,296 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import {
+  ArrowRight,
+  BookOpen,
   Box,
   ChevronRight,
-  CircleHelp,
-  Focus,
-  Info,
+  CircleAlert,
+  ExternalLink,
   Layers3,
-  Menu,
-  Pause,
-  RotateCcw,
-  RotateCw,
+  LoaderCircle,
   Search,
   Sparkles,
   X,
 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
-import AnatomyScene from './scene';
-import {
-  DEFAULT_VISIBLE,
-  SYSTEMS,
-  explanation,
-  type Atlas,
-  type SceneState,
-  type SystemId,
-  type View,
-} from './anatomy';
+import { TESLA_DEMO, type AtlasPart, type FoundryAtlas } from './foundry-data';
 
-type Panel = 'systems' | 'search' | 'about' | null;
-type SearchResult = {
-  key: string;
-  id: string;
-  name: string;
-  elements: string[];
-  system?: SystemId;
-  kind: 'concept' | 'mesh';
-};
+const examples = ['Tesla', 'espresso machine', 'DSLR camera', 'a male human body'];
 
-const ORGANS: SystemId[] = [
-  'cardiac',
-  'respiratory',
-  'digestive',
-  'urinary',
-  'endocrine',
-  'reproductive',
-  'sensory',
-];
-
-const INITIAL_STATE: SceneState = {
-  explode: 0,
-  visible: DEFAULT_VISIBLE,
-  selected: [],
-  isolate: false,
-  view: 'three-quarter',
-  rotate: false,
-  reset: 0,
-};
-
-const views: { id: View; short: string; label: string }[] = [
-  { id: 'three-quarter', short: '¾', label: 'Three-quarter view' },
-  { id: 'front', short: 'F', label: 'Front view' },
-  { id: 'side', short: 'S', label: 'Side view' },
-  { id: 'back', short: 'B', label: 'Back view' },
-];
-
-export default function Home() {
-  const searchInput = useRef<HTMLInputElement>(null);
-  const [atlas, setAtlas] = useState<Atlas | null>(null);
-  const [state, setState] = useState<SceneState>(INITIAL_STATE);
-  const [panel, setPanel] = useState<Panel>(null);
-  const [query, setQuery] = useState('');
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState('');
-  const [selectedLabel, setSelectedLabel] = useState<{ name: string; id: string } | null>(null);
-
-  useEffect(() => {
-    const abort = new AbortController();
-    fetch('/models/atlas.json', { signal: abort.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error('The anatomy catalog could not be loaded.');
-        return response.json();
-      })
-      .then((data) => setAtlas(data as Atlas))
-      .catch((reason: Error) => {
-        if (reason.name !== 'AbortError') setError(reason.message);
-      });
-    return () => abort.abort();
-  }, []);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === '/' && !(event.target instanceof HTMLInputElement)) {
-        event.preventDefault();
-        setPanel('search');
-        requestAnimationFrame(() => searchInput.current?.focus());
-      }
-      if (event.key === 'Escape') setPanel(null);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  const partsById = useMemo(() => new Map(atlas?.parts.map((part) => [part.id, part])), [atlas]);
-  const activeSystems = useMemo(
-    () =>
-      SYSTEMS.map((system) => ({
-        ...system,
-        count: atlas?.parts.filter((part) => part.system === system.id).length ?? 0,
-      })).filter((system) => system.count > 0),
-    [atlas],
+function ElectricVehicleVisual() {
+  return (
+    <svg className="foundry-ev" viewBox="0 0 900 430" role="img" aria-label={TESLA_DEMO.imageAlt}>
+      <defs>
+        <linearGradient id="car-shell" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ded8ca" />
+          <stop offset="0.48" stopColor="#817f79" />
+          <stop offset="1" stopColor="#272a28" />
+        </linearGradient>
+        <linearGradient id="car-glass" x1="0" y1="0" x2="0" y2="1">
+          <stop stopColor="#7f9699" stopOpacity=".82" />
+          <stop offset="1" stopColor="#1d2526" stopOpacity=".94" />
+        </linearGradient>
+        <filter id="car-shadow" x="-20%" y="-20%" width="140%" height="180%">
+          <feGaussianBlur stdDeviation="14" />
+        </filter>
+      </defs>
+      <ellipse cx="455" cy="348" rx="342" ry="30" fill="#000" opacity=".68" filter="url(#car-shadow)" />
+      <path d="M103 284c9-28 35-48 78-61l127-36c48-67 109-105 183-108h72c72 8 130 45 184 111l84 28c30 10 48 28 56 55l-7 35-67 12H169l-74-14z" fill="url(#car-shell)" stroke="#e8e2d3" strokeOpacity=".32" strokeWidth="2" />
+      <path d="M338 185c43-55 92-84 151-87h65c55 7 105 38 151 92l-188 1z" fill="url(#car-glass)" stroke="#c8d4d2" strokeOpacity=".23" />
+      <path d="M515 102v88M335 190h370M117 283h730" stroke="#f0eadc" strokeOpacity=".15" />
+      <path d="M204 248h-58M755 241l77 16" stroke="#d8bf7e" strokeWidth="5" strokeLinecap="round" opacity=".7" />
+      <g>
+        <circle cx="243" cy="304" r="67" fill="#131513" stroke="#aaa79e" strokeWidth="3" />
+        <circle cx="243" cy="304" r="39" fill="#4e514d" stroke="#c8c4b8" strokeWidth="2" />
+        <circle cx="243" cy="304" r="13" fill="#171917" />
+        <circle cx="706" cy="304" r="67" fill="#131513" stroke="#aaa79e" strokeWidth="3" />
+        <circle cx="706" cy="304" r="39" fill="#4e514d" stroke="#c8c4b8" strokeWidth="2" />
+        <circle cx="706" cy="304" r="13" fill="#171917" />
+      </g>
+      <path d="M302 285h348" stroke="#d8ba6f" strokeWidth="4" strokeDasharray="5 8" opacity=".64" />
+    </svg>
   );
+}
 
-  const selectedParts = state.selected.map((id) => partsById.get(id)).filter((part) => part !== undefined);
-  const selectedPart = selectedParts[0];
-  const selectedSystem = SYSTEMS.find((system) => system.id === selectedPart?.system);
-  const visibleCount =
-    atlas?.parts.filter((part) =>
-      state.isolate ? state.selected.includes(part.id) : state.visible.includes(part.system) || state.selected.includes(part.id),
-    ).length ?? 0;
+function useCompactLayout() {
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 760px)');
+    const update = () => setCompact(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return compact;
+}
 
-  const results = useMemo<SearchResult[]>(() => {
-    if (!atlas) return [];
-    const term = query.trim().toLowerCase();
-    const suggestions = new Set(['heart', 'brain', 'liver', 'stomach', 'femur', 'trachea']);
-    const concepts = atlas.concepts
-      .filter((concept) =>
-        term
-          ? concept.name.toLowerCase().includes(term) || concept.id.toLowerCase().includes(term)
-          : suggestions.has(concept.name.toLowerCase()),
-      )
-      .map<SearchResult>((concept) => ({
-        key: `concept-${concept.id}`,
-        id: concept.id,
-        name: concept.name,
-        elements: concept.elements,
-        kind: 'concept',
-      }));
-    const meshes = term
-      ? atlas.parts
-          .filter((part) => part.name.toLowerCase().includes(term) || part.id.toLowerCase().includes(term))
-          .map<SearchResult>((part) => ({
-            key: `mesh-${part.id}`,
-            id: part.id,
-            name: part.name,
-            elements: [part.id],
-            system: part.system,
-            kind: 'mesh',
-          }))
-      : [];
-    return [...concepts, ...meshes]
-      .sort((a, b) => Number(b.name.toLowerCase().startsWith(term)) - Number(a.name.toLowerCase().startsWith(term)) || a.name.length - b.name.length)
-      .slice(0, 60);
-  }, [atlas, query]);
+function targetPosition(index: number, count: number, compact: boolean) {
+  const columns = compact ? 2 : count <= 8 ? 3 : 4;
+  const rows = Math.ceil(count / columns);
+  const row = Math.floor(index / columns);
+  const col = index % columns;
+  const itemsInRow = Math.min(columns, count - row * columns);
+  const x = itemsInRow === 1 ? 50 : 10 + (col * 80) / (itemsInRow - 1);
+  const top = compact ? 10 : rows > 3 ? 11 : 17;
+  const bottom = compact ? 90 : rows > 3 ? 89 : 83;
+  const y = rows === 1 ? 50 : top + (row * (bottom - top)) / (rows - 1);
+  return { x, y };
+}
 
-  const selectResult = (result: SearchResult) => {
-    setSelectedLabel({ name: result.name, id: result.id });
-    setState((current) => ({
-      ...current,
-      selected: result.elements,
-      isolate: false,
-      rotate: false,
-    }));
-    setPanel(null);
-  };
+function sourceForPart(atlas: FoundryAtlas, part: AtlasPart) {
+  return atlas.sources.filter((source) => part.sourceUrls.includes(source.url));
+}
 
-  const selectPart = (id: string) => {
-    const part = partsById.get(id);
-    if (!part) return;
-    setSelectedLabel({ name: part.name, id: part.conceptId || part.id });
-    setState((current) => ({ ...current, selected: [id], isolate: false, rotate: false }));
-    setPanel(null);
-  };
+export default function FoundryHome() {
+  const compact = useCompactLayout();
+  const [prompt, setPrompt] = useState('Tesla');
+  const [atlas, setAtlas] = useState<FoundryAtlas>(TESLA_DEMO);
+  const [explode, setExplode] = useState(0);
+  const [selectedId, setSelectedId] = useState(TESLA_DEMO.parts[0].id);
+  const [activeSystem, setActiveSystem] = useState('All systems');
+  const [partQuery, setPartQuery] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [notice, setNotice] = useState('');
 
-  const setPreset = (systems: SystemId[]) => {
-    setSelectedLabel(null);
-    setState((current) => ({ ...current, visible: systems, selected: [], isolate: false }));
-  };
+  const systems = useMemo(() => ['All systems', ...Array.from(new Set(atlas.parts.map((part) => part.system)))], [atlas]);
+  const visibleParts = useMemo(() => {
+    const term = partQuery.trim().toLowerCase();
+    return atlas.parts.filter((part) => {
+      const inSystem = activeSystem === 'All systems' || part.system === activeSystem;
+      const matches = !term || `${part.name} ${part.system} ${part.sourceId}`.toLowerCase().includes(term);
+      return inSystem && matches;
+    });
+  }, [activeSystem, atlas.parts, partQuery]);
+  const selectedPart = atlas.parts.find((part) => part.id === selectedId) ?? visibleParts[0] ?? atlas.parts[0];
+  const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
 
-  const toggleSystem = (id: SystemId) => {
-    setState((current) => ({
-      ...current,
-      selected: [],
-      isolate: false,
-      visible: current.visible.includes(id) ? current.visible.filter((system) => system !== id) : [...current.visible, id],
-    }));
-    setSelectedLabel(null);
-  };
+  useEffect(() => {
+    if (!visibleParts.some((part) => part.id === selectedId) && visibleParts[0]) setSelectedId(visibleParts[0].id);
+  }, [selectedId, visibleParts]);
 
-  const reset = () => {
-    setState((current) => ({ ...INITIAL_STATE, reset: current.reset + 1 }));
-    setSelectedLabel(null);
-    setPanel(null);
-    setQuery('');
-  };
+  async function buildAtlas(event: FormEvent) {
+    event.preventDefault();
+    const subject = prompt.trim();
+    if (!subject || generating) return;
+    if (/\b(human|anatomy|bodyparts3d)\b/i.test(subject)) {
+      window.location.assign('/human');
+      return;
+    }
+    if (/\btesla\b/i.test(subject)) {
+      setAtlas(TESLA_DEMO);
+      setExplode(0);
+      setActiveSystem('All systems');
+      setPartQuery('');
+      setSelectedId(TESLA_DEMO.parts[0].id);
+      setNotice('Loaded the curated Tesla systems demo. Use a different subject to test live research.');
+      return;
+    }
+    setGenerating(true);
+    setNotice('Researching primary sources, building the catalog, then rendering an assembled reference…');
+    try {
+      const response = await fetch('/api/generate-atlas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: subject }),
+      });
+      const payload = (await response.json()) as { atlas?: FoundryAtlas; error?: string; code?: string; imageWarning?: string };
+      if (!response.ok || !payload.atlas) {
+        if (payload.code === 'NOT_CONFIGURED') {
+          throw new Error('Live generation needs an OPENAI_API_KEY on the server. The curated Tesla and verified human atlases are ready to show now.');
+        }
+        throw new Error(payload.error ?? 'The atlas could not be generated.');
+      }
+      setAtlas(payload.atlas);
+      setExplode(0);
+      setActiveSystem('All systems');
+      setPartQuery('');
+      setSelectedId(payload.atlas.parts[0]?.id ?? '');
+      setNotice(payload.imageWarning ? `Research complete. ${payload.imageWarning}` : 'Research complete. Every catalog card links back to its supporting sources.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'The atlas could not be generated.');
+    } finally {
+      setGenerating(false);
+    }
+  }
 
-  const selectedDescription = selectedPart
-    ? explanation(selectedLabel?.name ?? selectedPart.name, selectedPart.system)
-    : '';
+  const stageState = explode < 0.08 ? 'ASSEMBLED OBJECT' : explode > 0.88 ? 'COMPONENT INVENTORY' : 'SEPARATING SYSTEMS';
 
   return (
-    <main className="atlas-shell">
-      {atlas && (
-        <AnatomyScene
-          atlas={atlas}
-          state={{ ...state, inspectorOpen: Boolean(selectedPart) }}
-          onSelect={selectPart}
-          onProgress={setProgress}
-          onError={setError}
-        />
-      )}
-      <div className="studio-overlay" aria-hidden="true" />
-      <div className="grain" aria-hidden="true" />
-
-      <header className="brand-block">
-        <div className="brand-kicker"><span /> ANATOMICAL INDEX / BP3D 4.0</div>
-        <div className="brand-title-row">
-          <h1>Corpus</h1>
-          <Badge variant="outline">MALE 01</Badge>
-        </div>
-        <p>{atlas?.parts.length.toLocaleString() ?? '2,234'} preserved source meshes</p>
+    <main className="foundry-shell">
+      <div className="foundry-grain" />
+      <header className="foundry-header">
+        <a className="foundry-brand" href="/" aria-label="Atlas Foundry home">
+          <span className="foundry-brand-mark"><i /><i /><i /></span>
+          <span><strong>ATLAS</strong><small>FOUNDRY / 01</small></span>
+        </a>
+        <div className="foundry-header-note"><span>RESEARCH</span><i /><span>ASSEMBLE</span><i /><span>EXPLORE</span></div>
+        <a className="human-link" href="/human"><Box /> Verified 3D human atlas <ChevronRight /></a>
       </header>
 
-      <nav className="utility-nav" aria-label="Atlas utilities">
-        <Button variant="outline" onClick={() => setPanel(panel === 'search' ? null : 'search')} aria-label="Search structures">
-          <Search /> <span>Search atlas</span> <kbd>/</kbd>
-        </Button>
-        <Button variant="outline" size="icon" onClick={() => setPanel(panel === 'about' ? null : 'about')} aria-label="About this atlas">
-          <Info />
-        </Button>
-      </nav>
-
-      <aside className={`systems-panel glass-panel ${panel === 'systems' ? 'mobile-visible' : ''}`} aria-label="Anatomical systems">
-        <div className="panel-title-row">
-          <div>
-            <span className="micro-label">01 / LAYERS</span>
-            <h2>Systems</h2>
-          </div>
-          <Button variant="ghost" size="icon" className="mobile-only" onClick={() => setPanel(null)} aria-label="Close systems">
-            <X />
+      <section className="foundry-command" aria-label="Create an atlas">
+        <div className="command-copy">
+          <span className="foundry-eyebrow"><Sparkles /> GENERATIVE OBJECT INDEX</span>
+          <h1>What do you want to<br /><em>take apart?</em></h1>
+          <p>Research any object, map its major systems, and turn the result into a sourced, clickable exploded atlas.</p>
+        </div>
+        <form className="foundry-form" onSubmit={buildAtlas}>
+          <Search aria-hidden="true" />
+          <Input value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={160} aria-label="Object to explore" placeholder="A telescope, a sneaker, a steam engine…" />
+          <Button type="submit" disabled={generating}>
+            {generating ? <LoaderCircle className="spin" /> : <Sparkles />}
+            <span>{generating ? 'Building' : 'Build atlas'}</span>
+            {!generating && <ArrowRight />}
           </Button>
+        </form>
+        <div className="foundry-examples" aria-label="Example subjects">
+          <span>TRY</span>
+          {examples.map((example) => <button type="button" key={example} onClick={() => setPrompt(example)}>{example}</button>)}
         </div>
-        <div className="preset-row" aria-label="Layer presets">
-          <Button variant="ghost" aria-pressed={state.visible.length === activeSystems.length} onClick={() => setPreset(activeSystems.map((system) => system.id))}>All</Button>
-          <Button variant="ghost" aria-pressed={state.visible.length === 1 && state.visible[0] === 'skeletal'} onClick={() => setPreset(['skeletal'])}>Skeleton</Button>
-          <Button variant="ghost" aria-pressed={ORGANS.every((id) => state.visible.includes(id)) && state.visible.length === ORGANS.length} onClick={() => setPreset(ORGANS)}>Organs</Button>
-        </div>
-        <div className="system-list">
-          {activeSystems.map((system) => (
-            <div className={`system-item ${state.visible.includes(system.id) ? 'is-on' : ''}`} key={system.id}>
-              <Button variant="ghost" onClick={() => setPreset([system.id])} title={`Show only ${system.name}`}>
-                <i style={{ '--system-color': system.color } as CSSProperties} />
-                <span>{system.name}</span>
-                <small>{system.count}</small>
-              </Button>
-              <Switch checked={state.visible.includes(system.id)} onCheckedChange={() => toggleSystem(system.id)} aria-label={`Toggle ${system.name}`} />
-            </div>
-          ))}
-        </div>
-        <div className="panel-count"><span>{visibleCount.toLocaleString()} pieces staged</span><Button variant="ghost" onClick={() => setPreset([])}>Hide all</Button></div>
-      </aside>
-
-      {panel === 'search' && (
-        <section className="search-panel glass-panel" aria-label="Search atlas">
-          <div className="panel-title-row compact">
-            <div><span className="micro-label">02 / INDEX</span><h2>Find structure</h2></div>
-            <Button variant="ghost" size="icon" onClick={() => setPanel(null)} aria-label="Close search"><X /></Button>
-          </div>
-          <div className="search-field"><Search /><Input ref={searchInput} autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, FMA or mesh ID" /></div>
-          <div className="search-results" role="listbox">
-            {results.map((result) => (
-              <Button variant="ghost" role="option" key={result.key} onClick={() => selectResult(result)}>
-                <span><strong>{result.name}</strong><small>{result.kind === 'mesh' ? 'Source mesh' : `${result.elements.length} ${result.elements.length === 1 ? 'mesh' : 'meshes'}`}</small></span>
-                <code>{result.id}</code><ChevronRight />
-              </Button>
-            ))}
-            {!results.length && <p>No exact structure found. Try a broader anatomical term.</p>}
-          </div>
-          <p className="search-hint">Searches common/official names, FMA concepts, and source mesh identifiers.</p>
-        </section>
-      )}
-
-      {panel === 'about' && (
-        <section className="about-panel glass-panel" aria-label="About this atlas">
-          <div className="panel-title-row compact">
-            <div><span className="micro-label">SOURCE / SCOPE</span><h2>Anatomy, documented.</h2></div>
-            <Button variant="ghost" size="icon" onClick={() => setPanel(null)} aria-label="Close about"><X /></Button>
-          </div>
-          <p>This atlas presents the BodyParts3D 4.0 adult male reference as 2,234 individually selectable source meshes and 3,432 named concepts.</p>
-          <p>Geometry is web-optimized while preserving mesh identity. Colors and display layers are curated for exploration and do not replace the source ontology.</p>
-          <div className="about-stats"><span><strong>2.29M</strong> triangles</span><span><strong>15</strong> systems</span><span><strong>CC BY 4.0</strong> anatomy</span></div>
-          <p className="medical-note"><CircleHelp /> Educational reference only. Not a diagnostic, surgical, or clinical tool.</p>
-          <div className="source-links"><a href="https://lifesciencedb.jp/bp3d/" target="_blank" rel="noreferrer">BodyParts3D source ↗</a><a href="/ATTRIBUTION.md" target="_blank" rel="noreferrer">Attribution & adaptations ↗</a></div>
-        </section>
-      )}
-
-      <nav className="view-rail glass-panel" aria-label="Camera views">
-        {views.map((view) => (
-          <Button
-            key={view.id}
-            variant="ghost"
-            aria-label={view.label}
-            aria-pressed={state.view === view.id}
-            disabled={state.explode > 0.8 && view.id !== 'front'}
-            onClick={() => setState((current) => ({ ...current, view: view.id, rotate: false, reset: current.reset + 1 }))}
-          >{view.short}</Button>
-        ))}
-        <div className="rail-rule" />
-        <Button variant="ghost" aria-label={state.rotate ? 'Pause rotation' : 'Auto rotate'} disabled={state.explode > 0.35} aria-pressed={state.rotate} onClick={() => setState((current) => ({ ...current, rotate: !current.rotate }))}>{state.rotate ? <Pause /> : <RotateCw />}</Button>
-        <Button variant="ghost" aria-label="Reset atlas" onClick={reset}><RotateCcw /></Button>
-      </nav>
-
-      <div className="specimen-label" aria-live="polite">
-        <span />
-        {state.isolate ? selectedLabel?.name : state.explode > 0.94 ? 'VISIBLE-PART INVENTORY' : state.explode > 0.05 ? 'SEPARATED ANATOMY' : 'ASSEMBLED REFERENCE'}
-        <span />
-      </div>
-
-      <section className="control-dock glass-panel" aria-label="Exploded view controls">
-        <Button variant="ghost" className="systems-trigger mobile-only" onClick={() => setPanel(panel === 'systems' ? null : 'systems')}><Menu /><span>Layers</span></Button>
-        <div className="explode-control">
-          <div className="explode-copy"><span><Sparkles /> Exploded view</span><output>{Math.round(state.explode * 100)}<small>%</small></output></div>
-          <Slider
-            aria-label="Explosion amount"
-            min={0}
-            max={100}
-            step={1}
-            value={[state.explode * 100]}
-            onValueChange={(value) => {
-              const next = (Array.isArray(value) ? value[0] : value) / 100;
-              setState((current) => ({ ...current, explode: next, view: next > 0.8 ? 'front' : current.view, rotate: false }));
-            }}
-          />
-          <div className="explode-scale"><span>Assembled</span><span>Inventory</span></div>
-        </div>
-        <Button variant="ghost" className="dock-reset" onClick={reset}><RotateCcw /><span>Reset</span></Button>
+        {notice && <button type="button" className="foundry-notice" onClick={() => setNotice('')}><CircleAlert /> <span>{notice}</span><X /></button>}
       </section>
 
-      {selectedPart && (
-        <aside className="detail-panel glass-panel" aria-label="Selected structure details">
-          <div className="detail-system"><i style={{ background: selectedSystem?.color }} /><span>{selectedSystem?.name ?? 'Anatomy'}</span><Button variant="ghost" size="icon" aria-label="Clear selection" onClick={() => { setSelectedLabel(null); setState((current) => ({ ...current, selected: [], isolate: false })); }}><X /></Button></div>
-          <h2>{selectedLabel?.name ?? selectedPart.name}</h2>
-          <p>{selectedDescription}</p>
-          <div className="detail-meta"><span>Source ID<strong>{selectedLabel?.id ?? selectedPart.id}</strong></span><span>Selected<strong>{selectedParts.length} {selectedParts.length === 1 ? 'mesh' : 'meshes'}</strong></span></div>
-          {selectedParts.length > 1 && <p className="group-note">This named concept contains {selectedParts.length} preserved source meshes.</p>}
-          <Button className="isolate-button" onClick={() => setState((current) => ({ ...current, isolate: !current.isolate, explode: current.isolate ? current.explode : 0, rotate: false }))}><Focus />{state.isolate ? 'Return to context' : 'Isolate structure'}<ChevronRight /></Button>
-          <small className="disclaimer">Educational reference — not a clinical tool.</small>
+      <section className="foundry-workbench" aria-label={`${atlas.subject} component atlas`}>
+        <aside className="foundry-index">
+          <div className="foundry-section-number">01 / INDEX</div>
+          <div className="foundry-subject">
+            <span>{atlas.category}</span>
+            <h2>{atlas.subject}</h2>
+            <p>{atlas.subtitle}</p>
+          </div>
+          <label className="foundry-part-search">
+            <Search />
+            <Input value={partQuery} onChange={(event) => setPartQuery(event.target.value)} placeholder="Find a component" />
+          </label>
+          <div className="foundry-system-list">
+            {systems.map((system) => {
+              const count = system === 'All systems' ? atlas.parts.length : atlas.parts.filter((part) => part.system === system).length;
+              return (
+                <button type="button" key={system} className={activeSystem === system ? 'active' : ''} onClick={() => setActiveSystem(system)}>
+                  <span>{system}</span><small>{String(count).padStart(2, '0')}</small>
+                </button>
+              );
+            })}
+          </div>
+          <div className="foundry-mode">
+            <i className={atlas.mode === 'generated' ? 'generated' : ''} />
+            <span><strong>{atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} documented systems</small></span>
+          </div>
         </aside>
-      )}
 
-      <footer className="interaction-help">
-        <span><Box /> {state.explode > 0.8 ? 'Drag to pan' : 'Drag to orbit'} · Scroll/pinch to zoom · Tap to inspect</span>
-        <button onClick={() => setPanel('about')}>Data + credits</button>
-      </footer>
+        <section className="foundry-stage">
+          <div className="foundry-stage-head">
+            <span>{stageState}</span>
+            <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
+          </div>
+          <div className="foundry-stage-grid" aria-hidden="true" />
+          <div className="foundry-assembly" style={{ opacity: Math.max(0.12, 1 - explode * 0.9), transform: `translate(-50%, -50%) scale(${1 - explode * 0.16})` }}>
+            {atlas.image ? <img src={atlas.image} alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`} /> : <ElectricVehicleVisual />}
+            <span className="assembly-axis axis-x" /><span className="assembly-axis axis-y" />
+          </div>
+          <div className="foundry-parts" aria-label="Clickable component inventory">
+            {visibleParts.map((part, index) => {
+              const target = targetPosition(index, visibleParts.length, compact);
+              const left = 50 + (target.x - 50) * explode;
+              const top = 50 + (target.y - 50) * explode;
+              const active = part.id === selectedPart?.id;
+              return (
+                <button
+                  type="button"
+                  key={part.id}
+                  className={`foundry-part-node${active ? ' active' : ''}`}
+                  style={{ left: `${left}%`, top: `${top}%`, opacity: Math.min(1, Math.max(0, (explode - 0.08) * 2.5)), '--part-color': part.color } as CSSProperties}
+                  disabled={explode < 0.12}
+                  onClick={() => setSelectedId(part.id)}
+                >
+                  <i>{String(index + 1).padStart(2, '0')}</i>
+                  <span><strong>{part.name}</strong><small>{part.system}</small></span>
+                </button>
+              );
+            })}
+          </div>
+          {visibleParts.length === 0 && <div className="foundry-empty">No components match this filter.</div>}
+          <div className="foundry-slider glass-panel">
+            <div><Layers3 /><span>EXPLOSION</span><output>{Math.round(explode * 100)}%</output></div>
+            <Slider aria-label="Explosion amount" min={0} max={100} step={1} value={[explode * 100]} onValueChange={(value) => setExplode((Array.isArray(value) ? value[0] : value) / 100)} />
+            <div className="foundry-slider-labels"><span>ASSEMBLED</span><span>INVENTORY</span></div>
+          </div>
+        </section>
 
-      {(!atlas || progress < 100) && !error && (
-        <div className="loading-card glass-panel" role="status">
-          <div className="loading-orbit"><i /><i /><i /></div>
-          <div><strong>Assembling source anatomy</strong><span>{progress}% · {atlas ? `${atlas.parts.length.toLocaleString()} meshes` : 'Reading catalog'}</span><div><i style={{ width: `${progress}%` }} /></div></div>
-        </div>
-      )}
-      {error && <div className="error-card glass-panel" role="alert"><strong>Viewer unavailable</strong><p>{error}</p><Button onClick={() => window.location.reload()}>Reload atlas</Button></div>}
+        <aside className="foundry-detail">
+          <div className="foundry-section-number">02 / OBJECT RECORD</div>
+          {selectedPart ? (
+            <>
+              <div className="detail-index-row"><span style={{ background: selectedPart.color }} /> <small>{selectedPart.system}</small><code>{selectedPart.sourceId}</code></div>
+              <h2>{selectedPart.name}</h2>
+              <p>{selectedPart.description}</p>
+              <dl>
+                <div><dt>Evidence</dt><dd>{selectedPart.confidence}</dd></div>
+                <div><dt>References</dt><dd>{selectedSources.length || 'Catalog'}</dd></div>
+              </dl>
+              <div className="foundry-citations">
+                <span>SUPPORTING SOURCES</span>
+                {selectedSources.length ? selectedSources.map((source) => (
+                  <a href={source.url} target="_blank" rel="noreferrer" key={source.id}>
+                    <span><strong>{source.title}</strong><small>{source.publisher}</small></span><ExternalLink />
+                  </a>
+                )) : <p>See the full source register below.</p>}
+              </div>
+            </>
+          ) : <p>Select a component to inspect its record.</p>}
+          <div className="foundry-accuracy"><CircleAlert /><p><strong>Know what this is.</strong>{atlas.accuracyNote}</p></div>
+        </aside>
+      </section>
+
+      <section className="foundry-footnotes">
+        <div><span className="foundry-section-number">03 / RESEARCH NOTE</span><p>{atlas.summary}</p></div>
+        <div className="source-register"><span className="foundry-section-number">SOURCE REGISTER</span>{atlas.sources.slice(0, 4).map((source, index) => <a key={source.id} href={source.url} target="_blank" rel="noreferrer"><i>{String(index + 1).padStart(2, '0')}</i><span>{source.publisher}</span><ExternalLink /></a>)}</div>
+        <div className="foundry-boundary"><BookOpen /><p><strong>Conceptual by default.</strong> Generated atlases explain documented major components. They do not infer hidden geometry. When an authoritative mesh dataset exists, use a verified 3D edition—like the human atlas.</p></div>
+      </section>
     </main>
   );
 }

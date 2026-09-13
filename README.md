@@ -1,8 +1,8 @@
-# Corpus — Interactive 3D Human Atlas
+# Atlas Foundry
 
-Corpus is a dark-studio anatomy explorer built with React, TypeScript, Vite/vinext, Three.js, and shadcn-style UI components. It opens as an assembled adult male reference body, then separates every visible source mesh into a non-overlapping catalog layout.
+Atlas Foundry turns a subject into a sourced, clickable component atlas. Enter an object such as “espresso machine” or “DSLR camera”; the server researches reliable public sources, builds a concise component catalog, generates an assembled reference image, and presents the result as a non-overlapping exploded inventory.
 
-The included catalog is the full prepared BodyParts3D 4.0 adult male reference: **2,234 source meshes**, **3,432 named concepts**, and **2,288,268 rendered triangles**. The model is anatomical reference data, not generated anatomy.
+The project also preserves **Corpus**, the authoritative BodyParts3D adult male explorer, at `/human`. It contains 2,234 source meshes and must be distinguished from generated atlases: generic subjects are conceptual 2.5D learning maps, not inferred 3D geometry, service manuals, or engineering drawings.
 
 ## Run locally
 
@@ -10,10 +10,11 @@ Requires Node.js 22.13 or newer.
 
 ```bash
 npm ci
+cp .env.example .env.local
 npm run dev
 ```
 
-Open the local URL printed by the development server. No API keys are required.
+Add a server-side `OPENAI_API_KEY` to `.env.local` to enable live generation. The key is used only by `app/api/generate-atlas/route.ts` and is never sent to the browser. Without a key, the curated Tesla systems demo and full human atlas remain usable.
 
 Production checks:
 
@@ -24,77 +25,65 @@ npm run validate:interactions
 npm run build
 ```
 
-## Features
+## Product modes
 
-- Orbit, zoom, pan, and tap/click selection
-- 15 system layers with All, Skeleton, and Organs presets
-- Animated explosion slider from assembled anatomy to a packed visible-part inventory
-- Search by anatomical name, FMA concept ID, or BodyParts3D source mesh ID
-- Selection details with system context, official identifier, and educational description
-- Isolate and camera-frame selected structures or multi-mesh concepts
-- Mobile controls with drag-versus-tap handling and aspect-aware exploded packing
-- GPU per-part transforms and merged system geometry for responsive interaction
+- **Generated atlas:** web research with cited first-party or authoritative sources, 6–14 major component records, an AI-generated assembled reference image, system filters, component search, and explosion control.
+- **Curated demo:** a ready-to-show Tesla electric-vehicle systems overview. It is explicitly conceptual and varies by model/year/trim.
+- **Verified 3D edition:** the `/human` route uses identity-preserving BodyParts3D source meshes, GPU per-part transforms, geometric picking, and true visible-only exploded packing.
+
+Generated imagery is a visual navigation aid. It does not reveal hidden geometry, and component cards should not be interpreted as spatially exact callouts. Potentially dangerous teardown instructions are excluded by the research prompt.
 
 ## File structure
 
 ```text
 app/
-  anatomy.ts             Atlas types, system taxonomy, educational context
-  explosion-layout.ts    Visible-only, non-overlapping exploded packing
-  model-download.ts      Binary/gzip model decoding and validation
-  pointer-tap.ts         Tap-versus-drag and multitouch distinction
-  scene.tsx              Three.js renderer, batching, picking, camera framing
-  page.tsx               Explorer state and interface
-  globals.css            Dark studio visual system and responsive layouts
-components/ui/           shadcn-style Button, Badge, Input, Slider, Switch
-public/models/
-  atlas.json             Identity-preserving mesh/concept manifest and pinned chunk URLs
-public/ATTRIBUTION.md     Dataset license, source, and adaptation details
-scripts/
-  convert-anatomy.py     Official OBJ + metadata ingestion
-  optimize-anatomy.mjs   Per-mesh simplification and binary repacking
-  compress-models.mjs    Static-host gzip packaging
-  validate-atlas.mjs     Buffer, identity, name, and concept checks
-  validate-interactions.mjs  Packing, search, and pointer behavior checks
+  page.tsx                    Generic Atlas Foundry workbench
+  foundry-data.ts             Shared schema and curated Tesla demo
+  api/generate-atlas/route.ts Server-side web research and image generation
+  human/page.tsx              Full BodyParts3D interface
+  anatomy.ts                  Human system taxonomy and catalog types
+  scene.tsx                   Three.js batching, picking, and camera controls
+  explosion-layout.ts         Human visible-mesh exploded packing
+  globals.css                 Foundry and human dark-studio visual systems
+components/ui/                shadcn-style controls
+public/models/atlas.json      BodyParts3D identity-preserving manifest
+public/ATTRIBUTION.md         Anatomy data license and adaptation details
 ```
 
-## Data pipeline
+## Live data pipeline
 
-The ingestion boundary is `public/models/atlas.json`. The included manifest points to version-pinned browser-ready chunks from the public reference repository; the same chunk files can be dropped into `public/models/` and the manifest URLs changed to local paths for fully self-hosted deployments. Each part record preserves:
+`POST /api/generate-atlas` accepts `{ "prompt": "…" }` and performs two server-side operations:
 
-- BodyParts3D element ID
-- official English display name
-- FMA-style concept ID
-- display system
-- binary chunk and typed-array offsets
-- vertex/index counts
-- assembled-space bounds
+1. The OpenAI Responses API researches the public web and returns a strict component-atlas schema with supporting HTTPS sources.
+2. The Images API renders one assembled, unlabeled external reference view. If image generation fails, the researched catalog still returns and remains explorable.
+
+The UI packs only the currently visible records, interpolating them from the assembled center into a responsive desktop or two-column mobile inventory. Search and system filters recompute the layout, so filtered parts do not leave gaps or overlap.
+
+Generated results are transient and are not written to a database. Add persistence or object storage before offering saved public atlas URLs.
+
+## BodyParts3D data pipeline
+
+The human ingestion boundary is `public/models/atlas.json`. It points to version-pinned browser-ready chunks and preserves each BodyParts3D element ID, official name, FMA-style concept ID, display system, typed-array offsets, source bounds, and assembled transform.
 
 To rebuild from the official release:
 
-1. Download the official BodyParts3D 4.0 OBJ archive and the corresponding English concept/element relationship tables.
-2. Join source elements to their official names and FMA concepts; maintain a separate curated display-system map.
+1. Download the BodyParts3D 4.0 OBJ archive and English concept/element relationship tables.
+2. Join source elements to official names and FMA concepts, keeping the curated display-system map separate.
 3. Run `python3 scripts/convert-anatomy.py OBJ_DIRECTORY CONCEPT_MAP SYSTEM_MAP`.
 4. Run `node scripts/optimize-anatomy.mjs` and `node scripts/compress-models.mjs`.
 5. Run both validation scripts before publishing.
 
-The converter changes coordinate system and units for the browser stage, but does not merge source identities. Optimization is performed per structure; the renderer later merges geometry into system batches while using a per-vertex part index and GPU state textures for translation, visibility, and selection. Picking retains per-part geometry and source bounds.
+## License and attribution
 
-The exploded layout is computed only from currently visible meshes. Each projected source bound receives a dedicated packed cell, and automated checks exercise desktop and phone aspect ratios for overlap.
+BodyParts3D, © The Database Center for Life Science, is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
-## Anatomy license and attribution
+- [BodyParts3D downloads](https://dbarchive.biosciencedbc.jp/en/bodyparts3d/download.html)
+- [Dataset license](https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html)
+- [Source publication](https://doi.org/10.1093/nar/gkn613)
+- [Full local adaptation notes](public/ATTRIBUTION.md)
 
-BodyParts3D, © The Database Center for Life Science, is licensed under [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/).
+Prepared browser assets and portions of the human rendering/data-pipeline implementation are adapted from the MIT-licensed [ashemag/human-atlas](https://github.com/ashemag/human-atlas). Its license is preserved in `THIRD_PARTY_LICENSE.md`.
 
-- Dataset and downloads: https://dbarchive.biosciencedbc.jp/en/bodyparts3d/download.html
-- Dataset license: https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html
-- Source publication: Mitsuhashi et al. (2009), *BodyParts3D: 3D structure database for anatomical concepts*, https://doi.org/10.1093/nar/gkn613
-- Full adaptation notes: [`public/ATTRIBUTION.md`](public/ATTRIBUTION.md)
+## Disclaimer
 
-The prepared browser assets and portions of the rendering/data-pipeline implementation are adapted from the MIT-licensed [ashemag/human-atlas](https://github.com/ashemag/human-atlas) reference. Its license is preserved in `THIRD_PARTY_LICENSE.md`.
-
-When redistributing the anatomy files or derivatives, retain the BodyParts3D attribution and CC BY 4.0 notice.
-
-## Medical disclaimer
-
-This website is an educational anatomical reference. It is **not** a diagnostic, clinical, surgical-planning, or medical-decision tool. BodyParts3D represents an adult male reference anatomy and does not capture every structure, individual variation, pathology, or demographic.
+Atlas Foundry is educational. Generated atlases are not engineering, repair, safety, legal, or clinical tools. The human edition is not a diagnostic, surgical-planning, or medical-decision tool and represents one adult male reference anatomy rather than individual variation.
