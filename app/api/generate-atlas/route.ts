@@ -136,14 +136,38 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
   return { ...raw, sources, parts };
 }
 
-async function generateImage(connection: AiConnection, subject: string, visualPrompt: string) {
+function fallbackHotspots(parts: AtlasPart[]) {
+  const columns = parts.length <= 8 ? 3 : 4;
+  const rows = Math.ceil(parts.length / columns);
+  return Object.fromEntries(parts.map((part, index) => {
+    const row = Math.floor(index / columns);
+    const column = index % columns;
+    const itemsInRow = Math.min(columns, parts.length - row * columns);
+    const x = itemsInRow === 1 ? 50 : 12 + (column * 76) / (itemsInRow - 1);
+    const y = rows === 1 ? 50 : 16 + (row * 68) / (rows - 1);
+    return [part.id, { x, y }];
+  }));
+}
+
+async function generateImage(
+  connection: AiConnection,
+  subject: string,
+  visualPrompt: string,
+  mode: 'assembled' | 'exploded',
+  parts: AtlasPart[],
+) {
+  const componentList = parts.map((part, index) => `${index + 1}. ${part.name} (${part.system})`).join('\n');
+  const sharedDirection = `Photorealistic premium 3D product visualization of ${subject}. ${visualPrompt} Wide landscape, three-quarter view, deep charcoal and limestone museum studio, restrained graphite palette, realistic materials, precise soft key light and crisp rim lighting, high contrast with readable shadow detail. No people, no text, no labels, no arrows, no logos, no watermark, no workshop clutter. Educational conceptual visualization, not an engineering drawing or service guide.`;
+  const modeDirection = mode === 'assembled'
+    ? 'Show one complete, fully assembled object centered and intact. No cutaway, no exposed internals, and no floating or duplicated parts. Leave generous dark negative space around the silhouette.'
+    : `Create the matching exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. Keep the recognizable main shell or enclosing structure central. Pull every documented major component below into a distinct, generously separated, non-overlapping visual cluster. Show each component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent tiny proprietary internals; represent uncertain items only as a credible major assembly.\n\nDocumented components:\n${componentList}`;
   const response = await fetch(`${connection.baseUrl}/images/generations`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: connection.imageModel,
-      prompt: `Technical catalog hero image of ${subject}. ${visualPrompt} Show one fully assembled object, centered, three-quarter view, limestone and graphite dark studio, precise museum product lighting, isolated background, no people, no labels, no text, no logos, no exploded parts. Educational visualization, not an engineering drawing.`,
-      size: '1536x1024', quality: 'medium', output_format: 'webp',
+      prompt: `${sharedDirection} ${modeDirection}`,
+      size: '1536x1024', quality: 'high', output_format: 'webp',
     }),
   });
   if (!response.ok) throw new Error(`Image generation failed (${response.status}).`);
@@ -152,6 +176,61 @@ async function generateImage(connection: AiConnection, subject: string, visualPr
   if (image?.b64_json) return `data:image/webp;base64,${image.b64_json}`;
   if (image?.url) return image.url;
   throw new Error('Image generation returned no image.');
+}
+
+async function locateHotspots(connection: AiConnection, explodedImage: string, parts: AtlasPart[]) {
+  const fallback = fallbackHotspots(parts);
+  const hotspotSchema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['hotspots'],
+    properties: {
+      hotspots: {
+        type: 'array',
+        minItems: parts.length,
+        maxItems: parts.length,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'x', 'y'],
+          properties: {
+            id: { type: 'string' },
+            x: { type: 'number', minimum: 0, maximum: 100 },
+            y: { type: 'number', minimum: 0, maximum: 100 },
+          },
+        },
+      },
+    },
+  } as const;
+  const partList = parts.map((part) => `${part.id}: ${part.name}`).join('\n');
+  const response = await fetch(`${connection.baseUrl}/responses`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: connection.researchModel,
+      instructions: 'Locate components in an exploded-view product image. Return the visual center of each requested component cluster as x/y percentages measured from the top-left corner. Use every exact id once. If several related pieces form one system, use the center of that cluster.',
+      input: [{
+        role: 'user',
+        content: [
+          { type: 'input_text', text: `Locate these components:\n${partList}` },
+          { type: 'input_image', image_url: explodedImage, detail: 'high' },
+        ],
+      }],
+      text: { format: { type: 'json_schema', name: 'atlas_hotspots', strict: true, schema: hotspotSchema } },
+    }),
+  });
+  if (!response.ok) throw new Error(`Hotspot mapping failed (${response.status}).`);
+  const payload = (await response.json()) as Record<string, unknown>;
+  const located = JSON.parse(extractOutputText(payload)) as { hotspots?: Array<{ id: string; x: number; y: number }> };
+  const knownIds = new Set(parts.map((part) => part.id));
+  for (const hotspot of located.hotspots ?? []) {
+    if (!knownIds.has(hotspot.id) || !Number.isFinite(hotspot.x) || !Number.isFinite(hotspot.y)) continue;
+    fallback[hotspot.id] = {
+      x: Math.max(7, Math.min(93, hotspot.x)),
+      y: Math.max(9, Math.min(88, hotspot.y)),
+    };
+  }
+  return fallback;
 }
 
 export async function POST(request: Request) {
@@ -183,7 +262,7 @@ export async function POST(request: Request) {
   recent.push(now);
   requestWindows.set(clientId, recent);
 
-  const instructions = `You create careful educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals, museums, universities, government sources, standards bodies, and strong technical references. Identify 6–14 meaningful, physically distinct parts or major systems that a general learner can understand. Never invent proprietary internals, exact geometry, hidden components, or identifiers. When documentation does not support a claim, mark it contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one of the returned source URLs when possible. The visualPrompt should describe the external appearance only. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, or exhaustive dataset.`;
+  const instructions = `You create careful educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals, museums, universities, government sources, standards bodies, and strong technical references. Identify 6–14 meaningful, physically distinct parts or major systems that a general learner can understand. Never invent proprietary internals, exact geometry, hidden components, or identifiers. When documentation does not support a claim, mark it contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one of the returned source URLs when possible. The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, or exhaustive dataset.`;
 
   try {
     const researchResponse = await fetch(`${connection.baseUrl}/responses`, {
@@ -205,12 +284,23 @@ export async function POST(request: Request) {
     const responsePayload = (await researchResponse.json()) as Record<string, unknown>;
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
     const normalized = normalizeAtlas(rawAtlas);
-    let image: string | undefined;
-    let imageWarning: string | undefined;
-    try {
-      image = await generateImage(connection, normalized.subject, normalized.visualPrompt);
-    } catch (error) {
-      imageWarning = error instanceof Error ? error.message : 'The assembled image could not be generated.';
+    const imageResults = await Promise.allSettled([
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts),
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts),
+    ]);
+    const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
+    const explodedImage = imageResults[1].status === 'fulfilled' ? imageResults[1].value : undefined;
+    const imageWarnings = imageResults.flatMap((result, index) => result.status === 'rejected'
+      ? [`${index === 0 ? 'Assembled' : 'Exploded'} image: ${result.reason instanceof Error ? result.reason.message : 'generation failed.'}`]
+      : []);
+    const imageWarning = imageWarnings.length ? imageWarnings.join(' ') : undefined;
+    let hotspots = explodedImage ? fallbackHotspots(normalized.parts) : undefined;
+    if (explodedImage) {
+      try {
+        hotspots = await locateHotspots(connection, explodedImage, normalized.parts);
+      } catch (error) {
+        console.warn('Using fallback hotspot layout', error);
+      }
     }
     const atlas: FoundryAtlas = {
       subject: normalized.subject,
@@ -221,7 +311,10 @@ export async function POST(request: Request) {
       parts: normalized.parts,
       sources: normalized.sources,
       image,
-      imageAlt: `AI-generated assembled reference view of ${normalized.subject}`,
+      imageAlt: `Photorealistic AI-generated assembled reference view of ${normalized.subject}`,
+      explodedImage,
+      explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${normalized.subject}`,
+      hotspots,
       mode: 'generated',
       generatedAt: new Date().toISOString(),
     };

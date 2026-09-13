@@ -361,7 +361,8 @@ a { color: inherit; }
 .foundry-assembly img { display: block; width: 100%; max-height: 470px; object-fit: contain; mix-blend-mode: normal; mask-image: linear-gradient(to bottom, #000 88%, transparent 100%); }
 .foundry-assembly.rich-assembled { width: min(94%, 910px); top: 48%; filter: none; }
 .foundry-assembly.rich-assembled img { max-height: 590px; border: 1px solid #e6dcc819; box-shadow: 0 34px 80px #0008; mask-image: none; }
-.foundry-ev { display: block; width: 100%; overflow: visible; }
+.foundry-visual-fallback { min-height: 330px; display: grid; place-content: center; justify-items: center; gap: 12px; border: 1px solid #e6dcc819; background: radial-gradient(circle, #252720 0, #0d0e0c 70%); color: #6f7269; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; letter-spacing: .14em; }
+.foundry-visual-fallback svg { width: 35px; height: 35px; color: #a99c7e; stroke-width: 1; }
 .assembly-axis { position: absolute; z-index: -1; display: block; background: #d8caae23; }
 .assembly-axis::before, .assembly-axis::after { content: ""; position: absolute; width: 3px; height: 3px; border: 1px solid #b5a98e65; border-radius: 50%; }
 .axis-x { left: -7%; right: -7%; top: 70%; height: 1px; }

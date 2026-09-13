@@ -22,41 +22,6 @@ import { TESLA_DEMO, type AtlasPart, type FoundryAtlas } from './foundry-data';
 
 const examples = ['Tesla', 'espresso machine', 'DSLR camera', 'a male human body'];
 
-function ElectricVehicleVisual() {
-  return (
-    <svg className="foundry-ev" viewBox="0 0 900 430" role="img" aria-label={TESLA_DEMO.imageAlt}>
-      <defs>
-        <linearGradient id="car-shell" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#ded8ca" />
-          <stop offset="0.48" stopColor="#817f79" />
-          <stop offset="1" stopColor="#272a28" />
-        </linearGradient>
-        <linearGradient id="car-glass" x1="0" y1="0" x2="0" y2="1">
-          <stop stopColor="#7f9699" stopOpacity=".82" />
-          <stop offset="1" stopColor="#1d2526" stopOpacity=".94" />
-        </linearGradient>
-        <filter id="car-shadow" x="-20%" y="-20%" width="140%" height="180%">
-          <feGaussianBlur stdDeviation="14" />
-        </filter>
-      </defs>
-      <ellipse cx="455" cy="348" rx="342" ry="30" fill="#000" opacity=".68" filter="url(#car-shadow)" />
-      <path d="M103 284c9-28 35-48 78-61l127-36c48-67 109-105 183-108h72c72 8 130 45 184 111l84 28c30 10 48 28 56 55l-7 35-67 12H169l-74-14z" fill="url(#car-shell)" stroke="#e8e2d3" strokeOpacity=".32" strokeWidth="2" />
-      <path d="M338 185c43-55 92-84 151-87h65c55 7 105 38 151 92l-188 1z" fill="url(#car-glass)" stroke="#c8d4d2" strokeOpacity=".23" />
-      <path d="M515 102v88M335 190h370M117 283h730" stroke="#f0eadc" strokeOpacity=".15" />
-      <path d="M204 248h-58M755 241l77 16" stroke="#d8bf7e" strokeWidth="5" strokeLinecap="round" opacity=".7" />
-      <g>
-        <circle cx="243" cy="304" r="67" fill="#131513" stroke="#aaa79e" strokeWidth="3" />
-        <circle cx="243" cy="304" r="39" fill="#4e514d" stroke="#c8c4b8" strokeWidth="2" />
-        <circle cx="243" cy="304" r="13" fill="#171917" />
-        <circle cx="706" cy="304" r="67" fill="#131513" stroke="#aaa79e" strokeWidth="3" />
-        <circle cx="706" cy="304" r="39" fill="#4e514d" stroke="#c8c4b8" strokeWidth="2" />
-        <circle cx="706" cy="304" r="13" fill="#171917" />
-      </g>
-      <path d="M302 285h348" stroke="#d8ba6f" strokeWidth="4" strokeDasharray="5 8" opacity=".64" />
-    </svg>
-  );
-}
-
 function useCompactLayout() {
   const [compact, setCompact] = useState(false);
   useEffect(() => {
@@ -108,7 +73,7 @@ export default function FoundryHome() {
   }, [activeSystem, atlas.parts, partQuery]);
   const selectedPart = atlas.parts.find((part) => part.id === selectedId) ?? visibleParts[0] ?? atlas.parts[0];
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
-  const hasIllustratedExplosion = Boolean(atlas.explodedImage && atlas.hotspots);
+  const hasIllustratedExplosion = Boolean(atlas.explodedImage);
 
   useEffect(() => {
     if (!visibleParts.some((part) => part.id === selectedId) && visibleParts[0]) setSelectedId(visibleParts[0].id);
@@ -132,7 +97,7 @@ export default function FoundryHome() {
       return;
     }
     setGenerating(true);
-    setNotice('Researching primary sources, building the catalog, then rendering an assembled reference…');
+    setNotice('Researching primary sources, then rendering a matched photorealistic assembled and exploded pair…');
     try {
       const response = await fetch('/api/generate-atlas', {
         method: 'POST',
@@ -151,7 +116,7 @@ export default function FoundryHome() {
       setActiveSystem('All systems');
       setPartQuery('');
       setSelectedId(payload.atlas.parts[0]?.id ?? '');
-      setNotice(payload.imageWarning ? `Research complete. ${payload.imageWarning}` : 'Research complete. Every catalog card links back to its supporting sources.');
+      setNotice(payload.imageWarning ? `Research complete. ${payload.imageWarning}` : 'Research and photorealistic exploded views complete. Select any numbered component to inspect it.');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'The atlas could not be generated.');
     } finally {
@@ -232,19 +197,19 @@ export default function FoundryHome() {
           <div
             className={`foundry-assembly${hasIllustratedExplosion ? ' rich-assembled' : ''}`}
             style={{
-              opacity: hasIllustratedExplosion ? Math.max(0, 1 - explode * 2.35) : Math.max(0.12, 1 - explode * 0.9),
+              opacity: hasIllustratedExplosion ? Math.max(0, 1 - explode * 1.9) : Math.max(0.12, 1 - explode * 0.9),
               transform: `translate(-50%, -50%) scale(${1 - explode * (hasIllustratedExplosion ? 0.06 : 0.16)})`,
             }}
           >
-            {atlas.image ? <img src={atlas.image} alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`} /> : <ElectricVehicleVisual />}
+            {atlas.image ? <img src={atlas.image} alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`} /> : <div className="foundry-visual-fallback"><Box /><span>ASSEMBLED IMAGE UNAVAILABLE</span></div>}
             <span className="assembly-axis axis-x" /><span className="assembly-axis axis-y" />
           </div>
           {hasIllustratedExplosion && (
             <div
               className="foundry-exploded-visual"
               style={{
-                opacity: Math.max(0, Math.min(1, (explode - 0.12) * 2.8)),
-                transform: `translate(-50%, -50%) scale(${0.96 + explode * 0.04})`,
+                opacity: Math.max(0, Math.min(1, explode * 1.75)),
+                transform: `translate(-50%, -50%) scale(${0.93 + explode * 0.07})`,
               }}
             >
               <img src={atlas.explodedImage} alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`} />
@@ -261,7 +226,7 @@ export default function FoundryHome() {
                       key={part.id}
                       className={`foundry-hotspot${active ? ' active' : ''}`}
                       style={{ left: `${position.x}%`, top: `${position.y}%`, '--part-color': part.color } as CSSProperties}
-                      disabled={explode < 0.36}
+                      disabled={explode < 0.22}
                       onClick={() => setSelectedId(part.id)}
                       aria-label={`Select ${part.name}`}
                       aria-pressed={active}
