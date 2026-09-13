@@ -2,6 +2,8 @@
 
 Atlas Foundry turns a subject into a sourced, clickable component atlas. Enter an object such as “espresso machine” or “DSLR camera”; the server researches reliable public sources, builds a concise component catalog, generates an assembled reference image, and presents the result as a non-overlapping exploded inventory.
 
+**Live demo:** [build-an-interactive-3d-human-atlas.vercel.app](https://build-an-interactive-3d-human-atlas.vercel.app)
+
 ## Use this repo to make “exploding X”
 
 Point a coding agent at this repository and ask:
