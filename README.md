@@ -40,7 +40,7 @@ npm run build
 ## Product modes
 
 - **Generated atlas:** web research with cited first-party or authoritative sources, 6–14 major component records, an AI-generated assembled reference image, system filters, component search, and explosion control.
-- **Curated demo:** a ready-to-show Tesla electric-vehicle systems overview. It is explicitly conceptual and varies by model/year/trim.
+- **Curated demo:** a ready-to-show Tesla electric-vehicle systems overview with paired assembled/exploded studio illustrations and twelve clickable component regions. It is explicitly conceptual and varies by model/year/trim; the hotspots are a visual index, not service geometry.
 - **Verified 3D edition:** the `/human` route uses identity-preserving BodyParts3D source meshes, GPU per-part transforms, geometric picking, and true visible-only exploded packing.
 
 Generated imagery is a visual navigation aid. It does not reveal hidden geometry, and component cards should not be interpreted as spatially exact callouts. Potentially dangerous teardown instructions are excluded by the research prompt.

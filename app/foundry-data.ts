@@ -26,6 +26,9 @@ export type FoundryAtlas = {
   sources: AtlasSource[];
   image?: string;
   imageAlt?: string;
+  explodedImage?: string;
+  explodedImageAlt?: string;
+  hotspots?: Record<string, { x: number; y: number }>;
   mode: 'curated' | 'generated' | 'authoritative-3d';
   generatedAt?: string;
 };
@@ -43,7 +46,24 @@ export const TESLA_DEMO: FoundryAtlas = {
   accuracyNote:
     'Illustrative major-system map, not a teardown, repair guide, or engineering drawing. Always use the exact vehicle manual and qualified service information.',
   mode: 'curated',
-  imageAlt: 'Illustrative assembled electric vehicle in a dark technical studio',
+  image: '/tesla-assembled-v2.jpg',
+  imageAlt: 'Conceptual assembled Tesla Model 3-class electric vehicle in a dark museum studio',
+  explodedImage: '/tesla-exploded-v2.jpg',
+  explodedImageAlt: 'Conceptual exploded systems illustration of a Tesla Model 3-class electric vehicle',
+  hotspots: {
+    'body-structure': { x: 44, y: 23 },
+    'battery-pack': { x: 52, y: 78 },
+    'rear-drive': { x: 30, y: 49 },
+    'front-drive': { x: 70, y: 61 },
+    'power-electronics': { x: 15, y: 48 },
+    thermal: { x: 82, y: 48 },
+    suspension: { x: 27, y: 63 },
+    braking: { x: 14, y: 70 },
+    steering: { x: 46, y: 50 },
+    computers: { x: 59, y: 48 },
+    charging: { x: 12, y: 31 },
+    restraints: { x: 83, y: 27 },
+  },
   sources: [
     { id: 'tesla-owner', title: 'Model 3 Owner\'s Manual', publisher: 'Tesla', url: teslaManual },
     { id: 'tesla-service', title: 'Model 3 Service Manual', publisher: 'Tesla', url: teslaService },
@@ -121,10 +141,10 @@ export const TESLA_DEMO: FoundryAtlas = {
       sourceId: 'EV-SYS-10', color: '#788faa', sourceUrls: [teslaManual], confidence: 'medium',
     },
     {
-      id: 'low-voltage',
-      name: 'Low-voltage network',
+      id: 'charging',
+      name: 'Charging hardware',
       system: 'Electrical',
-      description: 'A separate low-voltage supply and wiring network powers controllers, lighting, locks, restraints, and other vehicle electronics.',
+      description: 'The charge inlet and onboard conversion hardware connect external power to the high-voltage battery while vehicle controls supervise safe energy transfer.',
       sourceId: 'EV-SYS-11', color: '#b5a369', sourceUrls: [teslaManual, teslaEmergency], confidence: 'high',
     },
     {

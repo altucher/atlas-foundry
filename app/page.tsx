@@ -108,6 +108,7 @@ export default function FoundryHome() {
   }, [activeSystem, atlas.parts, partQuery]);
   const selectedPart = atlas.parts.find((part) => part.id === selectedId) ?? visibleParts[0] ?? atlas.parts[0];
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
+  const hasIllustratedExplosion = Boolean(atlas.explodedImage && atlas.hotspots);
 
   useEffect(() => {
     if (!visibleParts.some((part) => part.id === selectedId) && visibleParts[0]) setSelectedId(visibleParts[0].id);
@@ -158,7 +159,7 @@ export default function FoundryHome() {
     }
   }
 
-  const stageState = explode < 0.08 ? 'ASSEMBLED OBJECT' : explode > 0.88 ? 'COMPONENT INVENTORY' : 'SEPARATING SYSTEMS';
+  const stageState = explode < 0.08 ? 'ASSEMBLED OBJECT' : explode > 0.88 ? (hasIllustratedExplosion ? 'EXPLODED SYSTEMS' : 'COMPONENT INVENTORY') : 'SEPARATING SYSTEMS';
 
   return (
     <main className="foundry-shell">
@@ -228,11 +229,52 @@ export default function FoundryHome() {
             <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
           </div>
           <div className="foundry-stage-grid" aria-hidden="true" />
-          <div className="foundry-assembly" style={{ opacity: Math.max(0.12, 1 - explode * 0.9), transform: `translate(-50%, -50%) scale(${1 - explode * 0.16})` }}>
+          <div
+            className={`foundry-assembly${hasIllustratedExplosion ? ' rich-assembled' : ''}`}
+            style={{
+              opacity: hasIllustratedExplosion ? Math.max(0, 1 - explode * 2.35) : Math.max(0.12, 1 - explode * 0.9),
+              transform: `translate(-50%, -50%) scale(${1 - explode * (hasIllustratedExplosion ? 0.06 : 0.16)})`,
+            }}
+          >
             {atlas.image ? <img src={atlas.image} alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`} /> : <ElectricVehicleVisual />}
             <span className="assembly-axis axis-x" /><span className="assembly-axis axis-y" />
           </div>
-          <div className="foundry-parts" aria-label="Clickable component inventory">
+          {hasIllustratedExplosion && (
+            <div
+              className="foundry-exploded-visual"
+              style={{
+                opacity: Math.max(0, Math.min(1, (explode - 0.12) * 2.8)),
+                transform: `translate(-50%, -50%) scale(${0.96 + explode * 0.04})`,
+              }}
+            >
+              <img src={atlas.explodedImage} alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`} />
+              <span className="foundry-art-badge">AI-ILLUSTRATED · DOCUMENTED SYSTEMS · NOT SERVICE GEOMETRY</span>
+              <div className="foundry-hotspots" aria-label="Clickable component regions">
+                {visibleParts.map((part) => {
+                  const position = atlas.hotspots?.[part.id];
+                  if (!position) return null;
+                  const partIndex = atlas.parts.findIndex((candidate) => candidate.id === part.id);
+                  const active = part.id === selectedPart?.id;
+                  return (
+                    <button
+                      type="button"
+                      key={part.id}
+                      className={`foundry-hotspot${active ? ' active' : ''}`}
+                      style={{ left: `${position.x}%`, top: `${position.y}%`, '--part-color': part.color } as CSSProperties}
+                      disabled={explode < 0.36}
+                      onClick={() => setSelectedId(part.id)}
+                      aria-label={`Select ${part.name}`}
+                      aria-pressed={active}
+                    >
+                      <i>{String(partIndex + 1).padStart(2, '0')}</i>
+                      <span>{part.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {!hasIllustratedExplosion && <div className="foundry-parts" aria-label="Clickable component inventory">
             {visibleParts.map((part, index) => {
               const target = targetPosition(index, visibleParts.length, compact);
               const left = 50 + (target.x - 50) * explode;
@@ -252,12 +294,12 @@ export default function FoundryHome() {
                 </button>
               );
             })}
-          </div>
+          </div>}
           {visibleParts.length === 0 && <div className="foundry-empty">No components match this filter.</div>}
           <div className="foundry-slider glass-panel">
             <div><Layers3 /><span>EXPLOSION</span><output>{Math.round(explode * 100)}%</output></div>
             <Slider aria-label="Explosion amount" min={0} max={100} step={1} value={[explode * 100]} onValueChange={(value) => setExplode((Array.isArray(value) ? value[0] : value) / 100)} />
-            <div className="foundry-slider-labels"><span>ASSEMBLED</span><span>INVENTORY</span></div>
+            <div className="foundry-slider-labels"><span>ASSEMBLED</span><span>{hasIllustratedExplosion ? 'EXPLODED VIEW' : 'INVENTORY'}</span></div>
           </div>
         </section>
 
