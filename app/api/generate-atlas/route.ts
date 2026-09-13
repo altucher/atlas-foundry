@@ -25,7 +25,7 @@ function directOpenAiModel(model: string) {
   return model.startsWith('openai/') ? model.slice('openai/'.length) : model;
 }
 
-function getAiConnection(): AiConnection | null {
+function getAiConnection(request: Request): AiConnection | null {
   const configuredResearchModel = process.env.OPENAI_RESEARCH_MODEL ?? defaultResearchModel;
   const configuredImageModel = process.env.OPENAI_IMAGE_MODEL ?? defaultImageModel;
   const directApiKey = process.env.OPENAI_API_KEY;
@@ -39,7 +39,9 @@ function getAiConnection(): AiConnection | null {
     };
   }
 
-  const gatewayCredential = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN;
+  const gatewayCredential = process.env.AI_GATEWAY_API_KEY
+    ?? process.env.VERCEL_OIDC_TOKEN
+    ?? request.headers.get('x-vercel-oidc-token');
   if (gatewayCredential) {
     return {
       apiKey: gatewayCredential,
@@ -152,7 +154,7 @@ async function generateImage(connection: AiConnection, subject: string, visualPr
 }
 
 export async function POST(request: Request) {
-  const connection = getAiConnection();
+  const connection = getAiConnection(request);
   if (!connection) {
     return NextResponse.json(
       { code: 'NOT_CONFIGURED', error: 'Live atlas generation is not configured on this deployment.' },
