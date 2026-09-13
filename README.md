@@ -2,6 +2,14 @@
 
 Atlas Foundry turns a subject into a sourced, clickable component atlas. Enter an object such as “espresso machine” or “DSLR camera”; the server researches reliable public sources, builds a concise component catalog, generates an assembled reference image, and presents the result as a non-overlapping exploded inventory.
 
+## Use this repo to make “exploding X”
+
+Point a coding agent at this repository and ask:
+
+> Use this repository to build an exploding atlas for **[X]**. Preserve its sourcing, fidelity labels, clickable parts, responsive non-overlapping layout, and attribution rules. Use authoritative 3D meshes when they exist; otherwise make a clearly labeled conceptual 2.5D atlas and do not invent hidden geometry.
+
+The agent-specific adaptation contract is in [`AGENTS.md`](AGENTS.md). It explains the fidelity decision, source requirements, extension points, validation steps, and definition of done.
+
 The project also preserves **Corpus**, the authoritative BodyParts3D adult male explorer, at `/human`. It contains 2,234 source meshes and must be distinguished from generated atlases: generic subjects are conceptual 2.5D learning maps, not inferred 3D geometry, service manuals, or engineering drawings.
 
 ## Run locally
@@ -74,6 +82,8 @@ To rebuild from the official release:
 5. Run both validation scripts before publishing.
 
 ## License and attribution
+
+Original application code is released under the [MIT License](LICENSE). Dataset files, generated assets, and third-party adaptations retain their own licenses and attribution requirements.
 
 BodyParts3D, © The Database Center for Life Science, is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
