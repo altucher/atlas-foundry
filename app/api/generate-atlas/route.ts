@@ -4,11 +4,53 @@ import type { AtlasPart, AtlasSource, FoundryAtlas } from '@/app/foundry-data';
 
 export const runtime = 'edge';
 
-const researchModel = process.env.OPENAI_RESEARCH_MODEL ?? 'gpt-6-astra';
-const imageModel = process.env.OPENAI_IMAGE_MODEL ?? 'gpt-image-2.5-flare';
+const defaultResearchModel = 'gpt-6-astra';
+const defaultImageModel = 'gpt-image-2.5-flare';
 const requestWindows = new Map<string, number[]>();
 const windowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 3;
+
+type AiConnection = {
+  apiKey: string;
+  baseUrl: string;
+  researchModel: string;
+  imageModel: string;
+};
+
+function gatewayModel(model: string) {
+  return model.includes('/') ? model : `openai/${model}`;
+}
+
+function directOpenAiModel(model: string) {
+  return model.startsWith('openai/') ? model.slice('openai/'.length) : model;
+}
+
+function getAiConnection(): AiConnection | null {
+  const configuredResearchModel = process.env.OPENAI_RESEARCH_MODEL ?? defaultResearchModel;
+  const configuredImageModel = process.env.OPENAI_IMAGE_MODEL ?? defaultImageModel;
+  const directApiKey = process.env.OPENAI_API_KEY;
+
+  if (directApiKey) {
+    return {
+      apiKey: directApiKey,
+      baseUrl: 'https://api.openai.com/v1',
+      researchModel: directOpenAiModel(configuredResearchModel),
+      imageModel: directOpenAiModel(configuredImageModel),
+    };
+  }
+
+  const gatewayCredential = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN;
+  if (gatewayCredential) {
+    return {
+      apiKey: gatewayCredential,
+      baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      researchModel: gatewayModel(configuredResearchModel),
+      imageModel: gatewayModel(configuredImageModel),
+    };
+  }
+
+  return null;
+}
 
 const atlasSchema = {
   type: 'object',
@@ -91,12 +133,12 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
   return { ...raw, sources, parts };
 }
 
-async function generateImage(apiKey: string, subject: string, visualPrompt: string) {
-  const response = await fetch('https://api.openai.com/v1/images/generations', {
+async function generateImage(connection: AiConnection, subject: string, visualPrompt: string) {
+  const response = await fetch(`${connection.baseUrl}/images/generations`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: imageModel,
+      model: connection.imageModel,
       prompt: `Technical catalog hero image of ${subject}. ${visualPrompt} Show one fully assembled object, centered, three-quarter view, limestone and graphite dark studio, precise museum product lighting, isolated background, no people, no labels, no text, no logos, no exploded parts. Educational visualization, not an engineering drawing.`,
       size: '1536x1024', quality: 'medium', output_format: 'webp',
     }),
@@ -110,8 +152,8 @@ async function generateImage(apiKey: string, subject: string, visualPrompt: stri
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  const connection = getAiConnection();
+  if (!connection) {
     return NextResponse.json(
       { code: 'NOT_CONFIGURED', error: 'Live atlas generation is not configured on this deployment.' },
       { status: 503 },
@@ -141,14 +183,14 @@ export async function POST(request: Request) {
   const instructions = `You create careful educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals, museums, universities, government sources, standards bodies, and strong technical references. Identify 6–14 meaningful, physically distinct parts or major systems that a general learner can understand. Never invent proprietary internals, exact geometry, hidden components, or identifiers. When documentation does not support a claim, mark it contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one of the returned source URLs when possible. The visualPrompt should describe the external appearance only. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, or exhaustive dataset.`;
 
   try {
-    const researchResponse = await fetch('https://api.openai.com/v1/responses', {
+    const researchResponse = await fetch(`${connection.baseUrl}/responses`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: researchModel,
+        model: connection.researchModel,
         instructions,
         input: `Build a component atlas for: ${prompt}`,
-        tools: [{ type: 'web_search_preview', search_context_size: 'medium' }],
+        tools: [{ type: 'web_search', search_context_size: 'medium' }],
         text: { format: { type: 'json_schema', name: 'component_atlas', strict: true, schema: atlasSchema } },
       }),
     });
@@ -163,7 +205,7 @@ export async function POST(request: Request) {
     let image: string | undefined;
     let imageWarning: string | undefined;
     try {
-      image = await generateImage(apiKey, normalized.subject, normalized.visualPrompt);
+      image = await generateImage(connection, normalized.subject, normalized.visualPrompt);
     } catch (error) {
       imageWarning = error instanceof Error ? error.message : 'The assembled image could not be generated.';
     }
@@ -180,7 +222,12 @@ export async function POST(request: Request) {
       mode: 'generated',
       generatedAt: new Date().toISOString(),
     };
-    return NextResponse.json({ atlas, imageWarning, researchModel, imageModel });
+    return NextResponse.json({
+      atlas,
+      imageWarning,
+      researchModel: connection.researchModel,
+      imageModel: connection.imageModel,
+    });
   } catch (error) {
     console.error('Atlas generation failed', error);
     return NextResponse.json({ error: 'The atlas could not be generated. Please try a more specific subject.' }, { status: 500 });

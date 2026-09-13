@@ -65,7 +65,7 @@ npm run validate:atlas   # required when the BodyParts3D edition is retained
 npm run build
 ```
 
-Live generation additionally requires a server-side `OPENAI_API_KEY`. Never commit credentials or expose them through a `NEXT_PUBLIC_` variable. Add durable rate limiting and result storage before opening expensive generation to high-volume public traffic.
+Live generation requires server-side AI authentication: direct `OPENAI_API_KEY`, local `AI_GATEWAY_API_KEY`, or Vercel's automatic `VERCEL_OIDC_TOKEN`. Never commit credentials or expose them through a `NEXT_PUBLIC_` variable. Add durable rate limiting and result storage before opening expensive generation to high-volume public traffic.
 
 ## Definition of done
 

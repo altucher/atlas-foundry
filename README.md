@@ -24,7 +24,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Add a server-side `OPENAI_API_KEY` to `.env.local` to enable live generation. The key is used only by `app/api/generate-atlas/route.ts` and is never sent to the browser. Without a key, the curated Tesla systems demo and full human atlas remain usable.
+Add a server-side `OPENAI_API_KEY` to `.env.local` to enable direct OpenAI generation locally, or use an `AI_GATEWAY_API_KEY` for Vercel AI Gateway. Credentials are used only by `app/api/generate-atlas/route.ts` and are never sent to the browser. Without a credential, the curated Tesla systems demo and full human atlas remain usable.
 
 Production checks:
 
@@ -35,7 +35,7 @@ npm run validate:interactions
 npm run build
 ```
 
-`npm run build` produces the Sites/Cloudflare Worker bundle. Vercel reads `vercel.json` and runs `next build --webpack` against the same App Router source. Add `OPENAI_API_KEY` as a Vercel server-side environment secret to enable arbitrary live atlas generation there.
+`npm run build` produces the Sites/Cloudflare Worker bundle. Vercel reads `vercel.json` and runs `next build --webpack` against the same App Router source. On Vercel, the API route automatically uses the deployment's private `VERCEL_OIDC_TOKEN` with AI Gateway, so no project-level secret needs to be copied. A team-level OpenAI BYOK credential, when configured in AI Gateway, remains private and is applied there.
 
 ## Product modes
 
