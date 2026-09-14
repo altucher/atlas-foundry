@@ -146,6 +146,9 @@ export default function FoundryHome() {
   const hasIllustratedExplosion = Boolean(atlas.explodedImage) && (!atlas.archive || activeLayer === 'Overview');
   const showingEveryPart = visibleParts.every((part) => (part.archiveLayer ?? 'Overview') === 'Overview');
   const supplierCount = vendors.length;
+  // Ease the illustrated regions outward early so the intermediate view reads as
+  // a product coming apart, rather than every component shrinking into one pile.
+  const explosionSpread = Math.sqrt(explode);
 
   async function refreshGallery() {
     try {
@@ -462,7 +465,11 @@ export default function FoundryHome() {
                 className="foundry-exploded-base"
                 src={atlas.explodedImage}
                 alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`}
-                style={{ opacity: showingEveryPart ? Math.max(0, Math.min(1, (explode - 0.82) / 0.18)) : 0 }}
+                style={{
+                  opacity: showingEveryPart
+                    ? Math.max(0, Math.min(1, (explode - 0.82) / 0.18))
+                    : Math.max(0, Math.min(0.28, (explode - 0.12) * 0.42)),
+                }}
               />
               {selectedPart && selectedConnections.length > 0 && !activeVendor && (
                 <svg className="foundry-connection-lines" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ opacity: Math.max(0, Math.min(1, (explode - 0.22) * 2.2)) }} aria-hidden="true">
@@ -470,10 +477,10 @@ export default function FoundryHome() {
                     const from = primaryHotspot(atlas, selectedPart.id);
                     const to = primaryHotspot(atlas, part.id);
                     if (!from || !to || !visibleParts.some((candidate) => candidate.id === part.id)) return [];
-                    const x1 = 50 + (from.x - 50) * explode;
-                    const y1 = 46 + (from.y - 46) * explode;
-                    const x2 = 50 + (to.x - 50) * explode;
-                    const y2 = 46 + (to.y - 46) * explode;
+                    const x1 = 50 + (from.x - 50) * explosionSpread;
+                    const y1 = 46 + (from.y - 46) * explosionSpread;
+                    const x2 = 50 + (to.x - 50) * explosionSpread;
+                    const y2 = 46 + (to.y - 46) * explosionSpread;
                     return (
                       <g key={`${selectedPart.id}-${part.id}-${connection.relationship}`} className={`connection-${connection.relationship}`}>
                         <line x1={x1} y1={y1} x2={x2} y2={y2} />
@@ -496,8 +503,8 @@ export default function FoundryHome() {
                     const right = Math.max(0, 100 - region.x - width / 2);
                     const bottom = Math.max(0, 100 - region.y - height / 2);
                     const left = Math.max(0, region.x - width / 2);
-                    const shiftX = (50 - region.x) * (1 - explode);
-                    const shiftY = (46 - region.y) * (1 - explode);
+                    const shiftX = (50 - region.x) * (1 - explosionSpread);
+                    const shiftY = (46 - region.y) * (1 - explosionSpread);
                     return (
                       <div
                         key={`${part.id}-layer-${regionIndex}`}
@@ -505,7 +512,7 @@ export default function FoundryHome() {
                         style={{
                           clipPath: `inset(${top}% ${right}% ${bottom}% ${left}% round 4%)`,
                           opacity: Math.max(0, Math.min(1, (explode - 0.18) / 0.68)),
-                          transform: `translate(${shiftX}%, ${shiftY}%) scale(${0.48 + explode * 0.52})`,
+                          transform: `translate(${shiftX}%, ${shiftY}%) scale(${0.72 + explosionSpread * 0.28})`,
                           transformOrigin: `${region.x}% ${region.y}%`,
                         }}
                       >
@@ -529,10 +536,10 @@ export default function FoundryHome() {
                       key={`${part.id}-${regionIndex}`}
                       className={`foundry-hotspot${active ? ' active' : ''}`}
                       style={{
-                        left: `${50 + (region.x - 50) * explode}%`,
-                        top: `${46 + (region.y - 46) * explode}%`,
-                        width: `${(region.width ?? 9) * (0.48 + explode * 0.52)}%`,
-                        height: `${(region.height ?? 9) * (0.48 + explode * 0.52)}%`,
+                        left: `${50 + (region.x - 50) * explosionSpread}%`,
+                        top: `${46 + (region.y - 46) * explosionSpread}%`,
+                        width: `${(region.width ?? 9) * (0.72 + explosionSpread * 0.28)}%`,
+                        height: `${(region.height ?? 9) * (0.72 + explosionSpread * 0.28)}%`,
                         '--part-color': part.color,
                       } as CSSProperties}
                       disabled={explode < 0.12}

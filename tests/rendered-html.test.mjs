@@ -61,6 +61,10 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /x-atlas-deep-build/);
   assert.match(generationRoute, /dataCenterDeepLayers/);
   assert.match(generationRoute, /Canonical data-center archive now contains/);
+  assert.match(generationRoute, /falconNineDeepLayers/);
+  assert.match(generationRoute, /Falcon 9 archive now contains/);
+  assert.match(generationRoute, /atlas_image_quality/);
+  assert.match(generationRoute, /ZERO intact or usable assembled copies/);
   assert.match(generationRoute, /retrying automatically/);
   assert.match(generationRoute, /forensic component-supply-chain researcher/);
   assert.match(generationRoute, /Supplier evidence pass/);
@@ -72,6 +76,7 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(store, /cacheKeyForPrompt/);
   assert.match(store, /CURRENT_INTELLIGENCE_VERSION/);
   assert.match(store, /normalized === 'data-center' \|\| normalized === 'data-centers'/);
+  assert.match(store, /normalized === 'falcon-9' \|\| normalized === 'spacex-falcon-9'/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /foundry-build-journal/);
   assert.match(page, /COMPONENT AUDIT/);

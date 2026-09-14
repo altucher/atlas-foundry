@@ -51,6 +51,38 @@ const dataCenterDeepLayers = [
     focus: 'BMS, EPMS, DCIM, orchestration, telemetry sensors, time synchronization, access control, video security, fire detection and suppression, life safety, environmental monitoring, spares, maintenance isolation, commissioning, and operating interfaces',
   },
 ] as const;
+const falconNineDeepLayers = [
+  {
+    id: 'airframe-tanks',
+    label: 'Airframe & tanks',
+    focus: 'first- and second-stage primary structures, aluminum-lithium tank barrels, domes, common structural interfaces, LOX and RP-1 tank volumes, pressurization vessels and lines, feedline penetrations, thrust structures, raceways, fairings, payload adapter, coatings, seals, insulation, and documented manufacturing or material relationships',
+  },
+  {
+    id: 'merlin-propulsion',
+    label: 'Merlin & propulsion',
+    focus: 'Merlin 1D and Merlin Vacuum engine assemblies and supported subassemblies: injector, chamber, regeneratively cooled jacket, turbopump, gas generator, valves, TEA-TEB ignition, gimbal actuators, nozzle and niobium extension, engine controllers, propellant manifolds, octaweb, plumbing, sensors, and engine-out architecture',
+  },
+  {
+    id: 'staging-payload',
+    label: 'Staging & payload',
+    focus: 'interstage, pneumatic stage-separation hardware, pushers and latches, second-stage interfaces, payload attach fittings, deployment hardware, payload fairing halves, acoustic and environmental provisions, venting, mission-specific adapters, rideshare hardware, and supported recovery or reuse details for fairings',
+  },
+  {
+    id: 'avionics-flight',
+    label: 'Avionics & flight',
+    focus: 'flight computers, engine controllers, guidance navigation and control, inertial and satellite navigation sensors, telemetry, antennas, tracking, command paths, batteries, power distribution, wiring, connectors, pressure and temperature sensing, flight software, cybersecurity boundaries, autonomous flight safety, licensed IP, and documented electronic-component relationships',
+  },
+  {
+    id: 'recovery-reuse',
+    label: 'Recovery & reuse',
+    focus: 'boostback, entry and landing architecture; nitrogen cold-gas thrusters, hypersonic grid fins and actuation, entry protection, landing burn engine selection, deployable landing legs, crush cores, footpads, hydraulic or electric actuation where documented, navigation aids, droneship interfaces, hold-down and lifting points, inspection, refurbishment, and reuse-related generation changes',
+  },
+  {
+    id: 'ground-mission',
+    label: 'Ground & mission interfaces',
+    focus: 'Falcon 9 vehicle-to-pad and vehicle-to-mission interfaces: transporter-erector strongback connections, hold-down and release, propellant and helium loading interfaces, electrical and data umbilicals, purge and environmental control, launch mount flame interface, payload access, range and tracking links, recovery assets, and generation- or site-specific variations without treating ground equipment as flying hardware',
+  },
+] as const;
 const aiDispatcher = new Agent({
   headersTimeout: 780_000,
   bodyTimeout: 780_000,
@@ -361,7 +393,22 @@ function archiveNameKey(value: string) {
   return value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-function mergeDataCenterLayers(base: FoundryAtlas, additions: Array<{ layer: (typeof dataCenterDeepLayers)[number]; atlas: FoundryAtlas }>) {
+type ArchiveLayerDefinition = { readonly id: string; readonly label: string; readonly focus: string };
+
+function mergeArchiveLayers(
+  base: FoundryAtlas,
+  additions: Array<{ layer: ArchiveLayerDefinition; atlas: FoundryAtlas }>,
+  config: {
+    canonicalKey: string;
+    aliases: string[];
+    idPrefix: string;
+    subject: string;
+    subtitle: (partCount: number) => string;
+    summary: string;
+    accuracyNote: string;
+    overviewFocus: string;
+  },
+) {
   const sourcesByUrl = new Map(base.sources.map((source) => [source.url, source]));
   const parts: AtlasPart[] = base.parts.map((part) => ({ ...part, archiveLayer: part.archiveLayer ?? 'Overview' }));
   const usedIds = new Set(parts.map((part) => part.id));
@@ -376,7 +423,7 @@ function mergeDataCenterLayers(base: FoundryAtlas, additions: Array<{ layer: (ty
         idMap.set(part.id, parts[existingIndex].id);
         continue;
       }
-      const stem = `dc-${layer.id}-${archiveSlug(part.name)}`;
+      const stem = `${config.idPrefix}-${layer.id}-${archiveSlug(part.name)}`;
       let id = stem;
       let suffix = 2;
       while (usedIds.has(id)) id = `${stem}-${suffix++}`;
@@ -417,7 +464,7 @@ function mergeDataCenterLayers(base: FoundryAtlas, additions: Array<{ layer: (ty
   }
 
   const layerMetadata = new Map((base.archive?.layers ?? [{
-    id: 'overview', label: 'Overview', focus: 'Facility-to-chip reference architecture',
+    id: 'overview', label: 'Overview', focus: config.overviewFocus,
     partCount: base.parts.filter((part) => !part.archiveLayer || part.archiveLayer === 'Overview').length,
     generatedAt: base.generatedAt ?? new Date().toISOString(),
   }]).map((layer) => [layer.id, layer]));
@@ -431,15 +478,15 @@ function mergeDataCenterLayers(base: FoundryAtlas, additions: Array<{ layer: (ty
 
   return {
     ...base,
-    subject: 'Data center',
-    subtitle: `${parts.length}-component multilevel facility-to-silicon research archive`,
-    summary: `${base.summary} This canonical archive adds separately explorable deep layers for site/building, the complete electrical and thermal chains, rack-to-silicon hardware, networking/optics/storage, and controls/safety/operations.`,
-    accuracyNote: `${base.accuracyNote} Deep layers are complementary vendor-neutral alternatives and do not imply that every component or vendor is installed together.`,
+    subject: config.subject,
+    subtitle: config.subtitle(parts.length),
+    summary: `${base.summary} ${config.summary}`,
+    accuracyNote: `${base.accuracyNote} ${config.accuracyNote}`,
     parts,
     sources: [...sourcesByUrl.values()].map((source, index) => ({ ...source, id: `source-${index + 1}` })),
     archive: {
-      canonicalKey: 'data-center',
-      aliases: ['data center', 'a data center', 'the data center', 'data centers'],
+      canonicalKey: config.canonicalKey,
+      aliases: config.aliases,
       layers: [...layerMetadata.values()],
     },
     generatedAt: new Date().toISOString(),
@@ -741,7 +788,16 @@ async function deepenDataCenterArchive(
   if (additions.length !== dataCenterDeepLayers.length) {
     report({ stage: 'research', message: `${additions.length}/${dataCenterDeepLayers.length} data-center deep layers completed; preserving successful layers for the archive.` });
   }
-  const merged = mergeDataCenterLayers(existing, additions);
+  const merged = mergeArchiveLayers(existing, additions, {
+    canonicalKey: 'data-center',
+    aliases: ['data center', 'a data center', 'the data center', 'data centers'],
+    idPrefix: 'dc',
+    subject: 'Data center',
+    subtitle: (partCount) => `${partCount}-component multilevel facility-to-silicon research archive`,
+    summary: 'This canonical archive adds separately explorable deep layers for site/building, the complete electrical and thermal chains, rack-to-silicon hardware, networking/optics/storage, and controls/safety/operations.',
+    accuracyNote: 'Deep layers are complementary vendor-neutral alternatives and do not imply that every component or vendor is installed together.',
+    overviewFocus: 'Facility-to-chip reference architecture',
+  });
   report({
     stage: 'inventory',
     message: `Canonical data-center archive now contains ${merged.parts.length} components across ${merged.archive?.layers.length ?? 1} explorable levels.`,
@@ -749,6 +805,78 @@ async function deepenDataCenterArchive(
   report({ stage: 'save', message: 'Saving every completed layer under the canonical data-center archive…' });
   const saved = await saveAtlasToGallery(merged, 'data center');
   report({ stage: 'done', message: 'Multilevel data-center archive complete; all common prompt aliases now reopen this record.' });
+  return saved;
+}
+
+async function researchFalconNineLayer(
+  connection: AiConnection,
+  layer: (typeof falconNineDeepLayers)[number],
+  existing: FoundryAtlas,
+  report: ProgressReporter,
+) {
+  const existingNames = existing.parts.map((part) => `${part.id} | ${part.name}`).join('\n');
+  const instructions = `Build one forensic deep-research layer for the SpaceX Falcon 9 launch-vehicle archive. Focus only on: ${layer.focus}.
+
+Return 24–36 distinct, physically or operationally identifiable components at the lowest level that public evidence can support. Distinguish Falcon 9 v1.0, v1.1, Full Thrust, Block 4, Block 5, Cargo Dragon, Crew Dragon, fairing, expendable and recovered missions wherever the hardware or supplier relationship changed. Treat the current Block 5 family as the reference, with earlier or mission-specific items explicitly labeled historical or variant-specific. Do not repeat overview items unless decomposing them into documented subassemblies.
+
+Prioritize SpaceX user guides, launch and mission material, NASA, FAA and NTSB records, environmental and regulatory filings, patents, supplier disclosures, SEC or exchange filings, technical conference papers, credible technical journalism, and high-quality imagery. Do not infer proprietary construction from photographs. Every component must cite a consulted HTTPS source. Preserve meaningful power, data, thermal, fluid, mechanical, structural, control and propulsive connections among ids returned in this layer.
+
+Audit the public supply chain as part of the architecture: retain SpaceX only for component-specific design, manufacture, software or integration that a source establishes. Search for outside manufacturers, materials, electronics, sensors, actuators, navigation and communications devices, licensed IP, foundry or fabrication, alternative generations and credible published reports. Label each relationship confirmed, reported or rumored and scope it to the exact generation, mission, period or subsystem. A dedicated component-by-component supplier pass follows.
+
+Return a concise accuracy boundary and an image prompt, although this deepening pass reuses the canonical overview images. Do not provide hazardous propellant procedures, launch parameters, exploit-relevant software details, or step-by-step construction instructions.`;
+  report({ stage: 'research', message: `Deep Falcon 9 layer · ${layer.label} — decomposing documented subassemblies…` });
+  const payload = await generateResearchWithFallback(connection, {
+    model: connection.researchModel,
+    reasoning: { effort: 'low' },
+    instructions,
+    input: `Canonical subject: SpaceX Falcon 9\nDeep layer: ${layer.label}\n\nExisting archive records to avoid duplicating:\n${existingNames}`,
+    tools: [{ type: 'web_search', search_context_size: 'medium' }],
+    text: { format: { type: 'json_schema', name: `falcon_9_${layer.id.replaceAll('-', '_')}`, strict: true, schema: atlasSchema } },
+  }, report, { stage: 'research', message: `${layer.label} deep research is still running` });
+  const raw = JSON.parse(extractOutputText(payload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
+  const normalized = normalizeAtlas(raw);
+  const layered = {
+    ...normalized,
+    subject: 'Falcon 9',
+    parts: normalized.parts.map((part) => ({ ...part, archiveLayer: layer.label })),
+    mode: 'generated' as const,
+    generatedAt: new Date().toISOString(),
+  };
+  report({ stage: 'inventory', message: `${layer.label} layer mapped ${layered.parts.length} lower-level components.` });
+  const enriched = await enrichSuppliers(connection, layered, report);
+  return { ...enriched, mode: 'generated', generatedAt: layered.generatedAt } satisfies FoundryAtlas;
+}
+
+async function deepenFalconNineArchive(
+  connection: AiConnection,
+  existing: FoundryAtlas,
+  report: ProgressReporter,
+) {
+  report({ stage: 'research', message: `Expanding Falcon 9 across ${falconNineDeepLayers.length} independent vehicle and mission layers…` });
+  const settled = await Promise.allSettled(falconNineDeepLayers.map(async (layer) => ({
+    layer,
+    atlas: await researchFalconNineLayer(connection, layer, existing, report),
+  })));
+  const additions = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+  for (const result of settled) if (result.status === 'rejected') console.warn('Falcon 9 deep layer failed', result.reason);
+  if (!additions.length) throw new Error('Every Falcon 9 archive deepening pass was unavailable.');
+  if (additions.length !== falconNineDeepLayers.length) {
+    report({ stage: 'research', message: `${additions.length}/${falconNineDeepLayers.length} Falcon 9 deep layers completed; preserving successful layers for the archive.` });
+  }
+  const merged = mergeArchiveLayers(existing, additions, {
+    canonicalKey: 'falcon-9',
+    aliases: ['Falcon 9', 'Falcon Nine', 'SpaceX Falcon 9', 'SpaceX Falcon Nine'],
+    idPrefix: 'f9',
+    subject: 'Falcon 9',
+    subtitle: (partCount) => `${partCount}-component multilevel launch-vehicle research archive`,
+    summary: 'This canonical archive adds separately explorable layers for airframe and tanks, Merlin propulsion, staging and payload systems, avionics and flight control, recovery and reuse, and ground/mission interfaces.',
+    accuracyNote: 'Deep layers distinguish Block 5, earlier generations, and mission-specific variants; they do not imply that every historical or alternative component flies together.',
+    overviewFocus: 'Block 5 vehicle and mission overview',
+  });
+  report({ stage: 'inventory', message: `Falcon 9 archive now contains ${merged.parts.length} components across ${merged.archive?.layers.length ?? 1} explorable levels.` });
+  report({ stage: 'save', message: 'Saving every completed Falcon 9 layer under one canonical archive…' });
+  const saved = await saveAtlasToGallery(merged, 'Falcon 9');
+  report({ stage: 'done', message: 'Multilevel Falcon 9 archive complete; common prompt aliases now reopen this record.' });
   return saved;
 }
 
@@ -767,23 +895,71 @@ async function generateImage(
   const sharedDirection = `Photorealistic premium 3D product visualization of ${subject}. ${visualPrompt} ${formatDirection} Canonical three-quarter view, deep charcoal and limestone museum studio, restrained graphite palette, realistic materials, precise soft key light and crisp rim lighting, high contrast with readable shadow detail. No people, no text, no labels, no arrows, no logos, no watermark, no workshop clutter. Educational conceptual visualization, not an engineering drawing or service guide.`;
   const modeDirection = mode === 'assembled'
     ? 'CRITICAL COMPOSITION RULE: show exactly one complete, fully assembled object, large and centered. No second reference copy, comparison panel, exploded layout, cutaway, exposed internals, floating pieces, duplicated product, inset, or side-by-side composition. The intact object should occupy most of the frame while remaining fully visible.'
-    : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. CRITICAL COMPOSITION RULE: depict exactly one product disassembled into its parts. Do not add an intact reference copy, second product, comparison view, inset, duplicated screen, or side-by-side assembled object. Keep the recognizable main shell or enclosing structure central. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
-  const response = await undiciFetch(`${connection.baseUrl}/images/generations`, {
+    : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. CRITICAL COMPOSITION RULE: depict the parts from exactly one product, with the product fully disassembled. There must be ZERO intact or usable assembled copies of the product anywhere in the image. Do not add a reference product, second product, comparison view, inset, duplicated display/screen, or side-by-side assembled object. Separate the outer shell, display or cover, input surfaces, internal boards, battery or power system, structural pieces, and connectors so no combination still reads as an intact product. Distribute the components broadly and evenly across the useful canvas; do not gather them into a central pile. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
+
+  let retryDirection = '';
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await undiciFetch(`${connection.baseUrl}/images/generations`, {
+      dispatcher: aiDispatcher,
+      method: 'POST',
+      headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: connection.imageModel,
+        prompt: `${sharedDirection} ${modeDirection}${retryDirection}`,
+        size: imageOrientation === 'portrait' ? '1024x1536' : '1536x1024', quality: 'high', output_format: 'webp',
+      }),
+    });
+    if (!response.ok) throw new Error(`Image generation failed (${response.status}).`);
+    const payload = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    const generated = payload.data?.[0];
+    const image = generated?.b64_json ? `data:image/webp;base64,${generated.b64_json}` : generated?.url;
+    if (!image) throw new Error('Image generation returned no image.');
+
+    try {
+      const assessment = await assessGeneratedImage(connection, image, subject, mode);
+      if (assessment.pass || attempt === 1) return image;
+      retryDirection = `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${assessment.issues.join(' ')} Recompose from scratch and satisfy every critical composition rule above.`;
+    } catch (error) {
+      console.warn('Image composition QA unavailable', error);
+      return image;
+    }
+  }
+  throw new Error('Image generation exhausted its composition attempts.');
+}
+
+async function assessGeneratedImage(
+  connection: AiConnection,
+  image: string,
+  subject: string,
+  mode: 'assembled' | 'exploded',
+) {
+  const schema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['pass', 'issues'],
+    properties: {
+      pass: { type: 'boolean' },
+      issues: { type: 'array', items: { type: 'string' }, maxItems: 8 },
+    },
+  } as const;
+  const passRule = mode === 'assembled'
+    ? 'Pass only when exactly one intact subject is shown, it is fully visible, it occupies most of the useful frame, and there is no second copy, exploded arrangement, inset, or excessive empty border.'
+    : 'Pass only when zero intact assembled products are shown, no major assembly such as a display is duplicated, the visible pieces all belong to one disassembled subject, components are distinct and non-overlapping, and they are distributed across the useful frame rather than piled at its center.';
+  const response = await undiciFetch(`${connection.baseUrl}/responses`, {
     dispatcher: aiDispatcher,
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: connection.imageModel,
-      prompt: `${sharedDirection} ${modeDirection}`,
-      size: imageOrientation === 'portrait' ? '1024x1536' : '1536x1024', quality: 'high', output_format: 'webp',
+      model: connection.researchModel,
+      reasoning: { effort: 'low' },
+      instructions: `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a reference copy merely because other parts are exploded.`,
+      input: [{ role: 'user', content: [{ type: 'input_image', image_url: image, detail: 'high' }] }],
+      text: { format: { type: 'json_schema', name: 'atlas_image_quality', strict: true, schema } },
     }),
   });
-  if (!response.ok) throw new Error(`Image generation failed (${response.status}).`);
-  const payload = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
-  const image = payload.data?.[0];
-  if (image?.b64_json) return `data:image/webp;base64,${image.b64_json}`;
-  if (image?.url) return image.url;
-  throw new Error('Image generation returned no image.');
+  if (!response.ok) throw new Error(`Image composition QA failed (${response.status}).`);
+  const payload = (await response.json()) as Record<string, unknown>;
+  return JSON.parse(extractOutputText(payload)) as { pass: boolean; issues: string[] };
 }
 
 async function locateHotspots(connection: AiConnection, explodedImage: string, parts: AtlasPart[]) {
@@ -894,12 +1070,20 @@ export async function POST(request: Request) {
   const promptCacheKey = cacheKeyForPrompt(prompt);
   const cachedAtlas = await loadCachedAtlas(promptCacheKey);
   const forceRefresh = request.headers.get('x-atlas-force-refresh') === '1';
-  const deepDataCenterBuild = request.headers.get('x-atlas-deep-build') === '1' && promptCacheKey === 'data-center';
-  if (!forceRefresh && !deepDataCenterBuild && cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
+  const deepBuildKey = request.headers.get('x-atlas-deep-build') === '1' && ['data-center', 'falcon-9'].includes(promptCacheKey)
+    ? promptCacheKey
+    : null;
+  if (!forceRefresh && !deepBuildKey && cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
     report({ stage: 'done', message: `Found ${cachedAtlas.subject} in the shared gallery.` });
     return NextResponse.json({ atlas: cachedAtlas, cached: true });
   }
-  if (cachedAtlas) report({ stage: 'cache', message: 'The saved atlas predates component-by-component supplier intelligence; rebuilding it once with the current research model…' });
+  if (cachedAtlas && cachedAtlas.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION) {
+    report({ stage: 'cache', message: 'The saved atlas predates component-by-component supplier intelligence; rebuilding it once with the current research model…' });
+  } else if (deepBuildKey) {
+    report({ stage: 'cache', message: `Using the saved ${deepBuildKey === 'data-center' ? 'data-center' : 'Falcon 9'} overview as the foundation for deeper research layers…` });
+  } else if (forceRefresh) {
+    report({ stage: 'cache', message: 'Refreshing the saved atlas, research record, and matched image pair…' });
+  }
 
   const connection = getAiConnection(request);
   if (!connection) {
@@ -918,12 +1102,14 @@ export async function POST(request: Request) {
   recent.push(now);
   requestWindows.set(clientId, recent);
 
-  if (deepDataCenterBuild) {
+  if (deepBuildKey) {
     if (!cachedAtlas || cachedAtlas.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION) {
-      return NextResponse.json({ error: 'Build the current data-center overview before requesting deep archive layers.' }, { status: 409 });
+      return NextResponse.json({ error: `Build the current ${deepBuildKey === 'data-center' ? 'data-center' : 'Falcon 9'} overview before requesting deep archive layers.` }, { status: 409 });
     }
     try {
-      const atlas = await deepenDataCenterArchive(connection, cachedAtlas, report);
+      const atlas = deepBuildKey === 'data-center'
+        ? await deepenDataCenterArchive(connection, cachedAtlas, report)
+        : await deepenFalconNineArchive(connection, cachedAtlas, report);
       return NextResponse.json({
         atlas,
         cached: false,
@@ -933,8 +1119,8 @@ export async function POST(request: Request) {
         imageModel: connection.imageModel,
       });
     } catch (error) {
-      console.error('Data-center archive deepening failed', error);
-      return NextResponse.json({ error: 'The data-center overview is safe, but the deep archive passes could not be completed. Please retry later.' }, { status: 500 });
+      console.error(`${deepBuildKey} archive deepening failed`, error);
+      return NextResponse.json({ error: `The ${deepBuildKey === 'data-center' ? 'data-center' : 'Falcon 9'} overview is safe, but the deep archive passes could not be completed. Please retry later.` }, { status: 500 });
     }
   }
 

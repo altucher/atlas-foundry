@@ -18,6 +18,7 @@ export function cacheKeyForPrompt(prompt: string) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 96);
   if (normalized === 'data-center' || normalized === 'data-centers') return 'data-center';
+  if (normalized === 'falcon-9' || normalized === 'spacex-falcon-9') return 'falcon-9';
   return normalized || 'atlas';
 }
 
