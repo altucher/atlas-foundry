@@ -255,6 +255,61 @@ function fallbackHotspots(parts: AtlasPart[]) {
   })) as Record<string, AtlasHotspot>;
 }
 
+function responseFailure(payload: Record<string, unknown>) {
+  const error = payload.error;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
+  const incomplete = payload.incomplete_details;
+  if (incomplete && typeof incomplete === 'object' && 'reason' in incomplete && typeof incomplete.reason === 'string') return incomplete.reason;
+  return `Research ended with status ${String(payload.status ?? 'unknown')}.`;
+}
+
+async function generateResearchInBackground(
+  connection: AiConnection,
+  body: Record<string, unknown>,
+  report: ProgressReporter,
+) {
+  const headers = { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' };
+  const created = await undiciFetch(`${connection.baseUrl}/responses`, {
+    dispatcher: aiDispatcher,
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ...body, background: true, store: true }),
+  });
+  if (!created.ok) {
+    const detail = await created.text();
+    throw new Error(`Research service failed (${created.status}): ${detail.slice(0, 500)}`);
+  }
+
+  let payload = (await created.json()) as Record<string, unknown>;
+  const responseId = typeof payload.id === 'string' ? payload.id : '';
+  if (!responseId) throw new Error('Background research returned no response id.');
+  const startedAt = Date.now();
+  let lastProgressAt = 0;
+
+  while (payload.status === 'queued' || payload.status === 'in_progress') {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > 500_000) throw new Error('Background research exceeded its eight-minute completion budget.');
+    if (elapsed - lastProgressAt >= 25_000) {
+      report({ stage: 'research', message: `Researching the architecture and supplier evidence… ${Math.max(1, Math.round(elapsed / 1000))} seconds elapsed.` });
+      lastProgressAt = elapsed;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    const polled = await undiciFetch(`${connection.baseUrl}/responses/${encodeURIComponent(responseId)}`, {
+      dispatcher: aiDispatcher,
+      method: 'GET',
+      headers,
+    });
+    if (!polled.ok) {
+      const detail = await polled.text();
+      throw new Error(`Research polling failed (${polled.status}): ${detail.slice(0, 500)}`);
+    }
+    payload = (await polled.json()) as Record<string, unknown>;
+  }
+
+  if (payload.status !== 'completed') throw new Error(responseFailure(payload));
+  return payload;
+}
+
 async function generateImage(
   connection: AiConnection,
   subject: string,
@@ -435,24 +490,13 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
 
   try {
     report({ stage: 'research', message: `Searching authoritative public sources for ${prompt}…` });
-    const researchResponse = await undiciFetch(`${connection.baseUrl}/responses`, {
-      dispatcher: aiDispatcher,
-      method: 'POST',
-      headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const responsePayload = await generateResearchInBackground(connection, {
         model: connection.researchModel,
         instructions,
         input: `Build a component atlas for: ${prompt}`,
         tools: [{ type: 'web_search', search_context_size: 'high' }],
         text: { format: { type: 'json_schema', name: 'component_atlas', strict: true, schema: atlasSchema } },
-      }),
-    });
-    if (!researchResponse.ok) {
-      const detail = await researchResponse.text();
-      console.error('Research request failed', researchResponse.status, detail.slice(0, 800));
-      return NextResponse.json({ error: `Research service failed (${researchResponse.status}).` }, { status: 502 });
-    }
-    const responsePayload = (await researchResponse.json()) as Record<string, unknown>;
+    }, report);
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
     const normalized = normalizeAtlas(rawAtlas);
     report({ stage: 'inventory', message: `Mapped ${normalized.parts.length} documented components across ${new Set(normalized.parts.map((part) => part.system)).size} systems.` });

@@ -79,7 +79,7 @@ public/ATTRIBUTION.md         Anatomy data license and adaptation details
 
 The browser requests an NDJSON progress stream. Submission immediately scrolls to the workbench, where a quiet build journal reports cache lookup, research, the actual named sources returned by the research pass, component inventory size, both image renders, hotspot mapping, and the gallery save. These are operational milestones—not hidden model reasoning.
 
-The generation route requests an extended Fluid-compute window and uses a matching long-running server HTTP client because a first-time 60-part infrastructure atlas can take longer than five minutes across research, two high-quality renders, and visual localization. The deployment plan must support the configured duration; completed subjects subsequently load from the shared gallery.
+The generation route requests an extended Fluid-compute window. Deep web research is submitted as an OpenAI background response and polled to completion, avoiding a fragile single five-minute HTTP connection; the two high-quality renders and visual-localization pass then run in the same bounded request. The deployment plan must support the configured duration; completed subjects subsequently load from the shared gallery.
 
 The UI packs only the currently visible records, interpolating them from the assembled center into a responsive desktop or two-column mobile inventory. Search and system filters recompute the layout, so filtered parts do not leave gaps or overlap.
 

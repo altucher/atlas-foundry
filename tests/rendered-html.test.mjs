@@ -49,6 +49,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /maxItems: 60/);
   assert.match(generationRoute, /maxDuration = 800/);
   assert.match(generationRoute, /headersTimeout: 780_000/);
+  assert.match(generationRoute, /background: true/);
+  assert.match(generationRoute, /responses\/\$\{encodeURIComponent\(responseId\)\}/);
   assert.match(galleryRoute, /ATLAS_CACHE_ORIGIN/);
   assert.match(store, /@vercel\/blob/);
   assert.match(store, /cacheKeyForPrompt/);
