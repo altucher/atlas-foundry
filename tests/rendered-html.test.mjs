@@ -53,6 +53,9 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /headersTimeout: 780_000/);
   assert.match(generationRoute, /background: true/);
   assert.match(generationRoute, /responses\/\$\{encodeURIComponent\(responseId\)\}/);
+  assert.match(generationRoute, /gpt-5\.6-terra/);
+  assert.match(generationRoute, /gpt-5\.6-luna/);
+  assert.match(generationRoute, /retrying automatically/);
   assert.match(generationRoute, /forensic component-supply-chain researcher/);
   assert.match(generationRoute, /Supplier evidence pass/);
   assert.match(generationRoute, /Coverage is an audit ledger/);

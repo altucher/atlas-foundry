@@ -10,7 +10,9 @@ export const runtime = 'nodejs';
 // compute permits up to 800 seconds; deployments need a plan that accepts it.
 export const maxDuration = 800;
 
-const defaultResearchModel = 'gpt-6-astra';
+// Terra retains flagship-class web research and structured output while staying
+// inside the gateway's upstream response window for 36–60 part architectures.
+const defaultResearchModel = 'gpt-5.6-terra';
 const defaultImageModel = 'gpt-image-2.5-flare';
 const requestWindows = new Map<string, number[]>();
 const windowMs = 10 * 60 * 1000;
@@ -387,6 +389,36 @@ async function generateResearchInBackground(
   return payload;
 }
 
+async function generateResearchWithFallback(
+  connection: AiConnection,
+  body: Record<string, unknown>,
+  report: ProgressReporter,
+  progress?: { stage: ProgressStage; message: string },
+) {
+  try {
+    return await generateResearchInBackground(connection, body, report, progress);
+  } catch (firstError) {
+    const fallbackId = String(body.model ?? '').includes('terra') ? 'gpt-5.6-luna' : 'gpt-5.6-terra';
+    const fallbackModel = connection.baseUrl === 'https://api.openai.com/v1' ? fallbackId : gatewayModel(fallbackId);
+    const tools = Array.isArray(body.tools)
+      ? body.tools.map((tool) => tool && typeof tool === 'object' && 'type' in tool && tool.type === 'web_search'
+        ? { ...tool, search_context_size: 'low' }
+        : tool)
+      : body.tools;
+    console.warn(`Research attempt with ${String(body.model)} failed; retrying with ${fallbackModel}`, firstError);
+    report({
+      stage: progress?.stage ?? 'research',
+      message: `The research provider ended the first connection; retrying automatically with ${fallbackId} and a bounded source window…`,
+    });
+    return generateResearchInBackground(connection, {
+      ...body,
+      model: fallbackModel,
+      reasoning: { effort: 'low' },
+      tools,
+    }, report, progress);
+  }
+}
+
 async function researchSupplierBatch(
   connection: AiConnection,
   atlas: ReturnType<typeof normalizeAtlas>,
@@ -411,8 +443,9 @@ Each note must state the role, exact product/version/time scope, whether the rel
 
 Coverage is an audit ledger, not a confidence performance. Return exactly one coverage entry for every supplied partId. Use sourced when at least one retained relationship is backed by a component-specific source; searched-no-specific-evidence when you searched the avenues above but found no sufficiently specific relationship; and not-applicable only when the item genuinely has no external vendor or IP relationship to research. The summary must briefly state which product-family/current/historical avenues were checked and why evidence was retained or withheld. Never omit a supplied partId.`;
   report({ stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} · checking ${parts.length} components individually…` });
-  const payload = await generateResearchInBackground(connection, {
+  const payload = await generateResearchWithFallback(connection, {
     model: connection.researchModel,
+    reasoning: { effort: 'low' },
     instructions,
     input: `Subject: ${atlas.subject}\nCategory: ${atlas.category}\nAccuracy boundary: ${atlas.accuracyNote}\n\nComponent ids:\n${partList}\n\nExisting architecture sources (use only when they directly support a relationship):\n${existingSources}`,
     tools: [{ type: 'web_search', search_context_size: 'medium' }],
@@ -700,8 +733,9 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
 
   try {
     report({ stage: 'research', message: `Searching authoritative public sources for ${prompt}…` });
-    const responsePayload = await generateResearchInBackground(connection, {
+    const responsePayload = await generateResearchWithFallback(connection, {
         model: connection.researchModel,
+        reasoning: { effort: 'low' },
         instructions,
         input: `Build a component atlas for: ${prompt}`,
         tools: [{ type: 'web_search', search_context_size: 'medium' }],
@@ -781,7 +815,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     });
   } catch (error) {
     console.error('Atlas generation failed', error);
-    return NextResponse.json({ error: 'The atlas could not be generated. Please try a more specific subject.' }, { status: 500 });
+    return NextResponse.json({ error: 'The research provider ended both generation attempts before completion. Your subject is valid; please retry in a few minutes.' }, { status: 500 });
   }
   };
 
