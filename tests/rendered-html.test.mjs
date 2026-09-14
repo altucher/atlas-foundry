@@ -20,7 +20,10 @@ test("server-renders the Atlas Foundry workbench", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Atlas Foundry — Take Anything Apart<\/title>/i);
+  assert.match(html, /<title>Explode Anything — Interactive Component Atlases<\/title>/i);
+  assert.match(html, /EXPLODE/);
+  assert.match(html, /ANYTHING \/ 01/);
+  assert.match(html, /Watch trailer/);
   assert.match(html, /What do you want to/);
   assert.match(html, /SAVED \/ SHARED GALLERY/);
   assert.match(html, /VENDORS/);
@@ -95,6 +98,7 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /foundry-build-journal/);
   assert.match(page, /SUPPLIER RESEARCH/);
   assert.match(page, /phase: 'enrich'/);
+  assert.match(page, /explode-anything-trailer\.mp4/);
   assert.match(page, /COMPONENT AUDIT/);
   assert.match(page, /Open evidence for/);
   assert.match(page, /RESEARCH LAYERS/);

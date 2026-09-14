@@ -1,6 +1,8 @@
-# Atlas Foundry
+# Explode Anything
 
-Atlas Foundry turns a subject into a sourced, clickable component atlas. Enter an object such as “espresso machine,” “Tesla,” or “data center”; the server researches reliable public sources, builds a deep component catalog, generates matched photorealistic assembled and exploded views, and maps the documented parts into a clickable visual index.
+Explode Anything turns a subject into a sourced, clickable component atlas. Enter an object such as “espresso machine,” “Tesla,” or “data center”; the server researches reliable public sources, builds a deep component catalog, generates matched photorealistic assembled and exploded views, and maps the documented parts into a clickable visual index.
+
+The home-page header includes a 27-second narrated product trailer demonstrating the explosion slider, component records, data-center research layers, supplier evidence, public-company tickers, and finance links.
 
 **Live demo:** [build-an-interactive-3d-human-atlas.vercel.app](https://build-an-interactive-3d-human-atlas.vercel.app)
 

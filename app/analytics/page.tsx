@@ -7,7 +7,7 @@ import { adminCookieName, analyticsConfigured, readAnalyticsEvents, validAdminCo
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Private Analytics — Atlas Foundry',
+  title: 'Private Analytics — Explode Anything',
   robots: { index: false, follow: false, nocache: true },
 };
 
@@ -38,7 +38,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     return (
       <main className="analytics-login" data-analytics-private="true">
         <section>
-          <span>ATLAS FOUNDRY / PRIVATE</span>
+          <span>EXPLODE ANYTHING / PRIVATE</span>
           <h1>Analytics access</h1>
           <p>{analyticsConfigured() ? 'Enter the private admin password to view visitor behavior and research demand.' : 'Analytics is locked until ANALYTICS_ADMIN_PASSWORD is configured on the server.'}</p>
           <form action="/api/analytics/login" method="post">
@@ -47,7 +47,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
             {query.error ? <small>That password was not accepted.</small> : null}
             <button type="submit" disabled={!analyticsConfigured()}>Open dashboard</button>
           </form>
-          <Link href="/">Return to Atlas Foundry</Link>
+          <Link href="/">Return to Explode Anything</Link>
         </section>
       </main>
     );
@@ -83,7 +83,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   return (
     <main className="analytics-shell" data-analytics-private="true">
       <header className="analytics-head">
-        <div><span>ATLAS FOUNDRY / PRIVATE</span><h1>Audience intelligence</h1><p>Anonymous product usage, research demand, and interaction behavior.</p></div>
+        <div><span>EXPLODE ANYTHING / PRIVATE</span><h1>Audience intelligence</h1><p>Anonymous product usage, research demand, and interaction behavior.</p></div>
         <div className="analytics-actions"><Link href="/">Open site</Link><form action="/api/analytics/logout" method="post"><button type="submit">Sign out</button></form></div>
       </header>
 

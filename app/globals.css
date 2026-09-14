@@ -298,6 +298,17 @@ a { color: inherit; }
 .human-link:hover { color: #eee6d6; border-color: #d8c8a54d; background: #1a1b17; }
 .human-link svg { width: 13px; }
 .human-link svg:last-child { width: 10px; color: #706e64; }
+.foundry-header-actions { justify-self: end; display: flex; align-items: center; gap: 8px; }
+.trailer-link { height: 37px; display: flex; align-items: center; gap: 7px; padding: 0 11px; border: 1px solid #c9b6813d; border-radius: 4px; color: #cbbb91; background: #2b26199e; font-size: 9px; cursor: pointer; transition: border-color .2s, color .2s, background .2s; }
+.trailer-link:hover { color: #f2e3b8; border-color: #d8c37b78; background: #38301e; }
+.trailer-link svg { width: 12px; fill: currentColor; }
+.trailer-modal { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 24px; background: #030403dc; backdrop-filter: blur(16px); }
+.trailer-dialog { width: min(1120px, 96vw); overflow: hidden; border: 1px solid #d6c28a59; border-radius: 6px; background: #090a09; box-shadow: 0 34px 120px #000; }
+.trailer-dialog-head { height: 45px; display: flex; align-items: center; justify-content: space-between; padding: 0 13px 0 16px; color: #9e9273; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; letter-spacing: .14em; }
+.trailer-dialog-head button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid #e6dcc51f; border-radius: 50%; color: #aaa69b; background: #151613; cursor: pointer; }
+.trailer-dialog-head button:hover { color: #f2eadb; border-color: #e6dcc553; }
+.trailer-dialog-head svg { width: 13px; }
+.trailer-dialog video { width: 100%; display: block; aspect-ratio: 16 / 9; background: #050605; }
 
 .foundry-command { position: relative; z-index: 3; display: grid; grid-template-columns: minmax(330px, 520px) minmax(400px, 1fr); column-gap: clamp(40px, 8vw, 145px); row-gap: 13px; align-items: end; padding: 68px clamp(34px, 6vw, 96px) 60px; border-bottom: 1px solid var(--foundry-line); }
 .foundry-command::before { content: "BUILD / EXPLORE / UNDERSTAND"; position: absolute; right: -10px; top: 27px; color: #ffffff09; font-family: Georgia, "Times New Roman", serif; font-size: clamp(48px, 7vw, 104px); letter-spacing: -.05em; white-space: nowrap; pointer-events: none; }
@@ -563,6 +574,11 @@ a { color: inherit; }
   .foundry-brand strong { font-size: 16px; }
   .human-link { padding-inline: 10px; }
   .human-link span, .human-link svg:last-child { display: none; }
+  .foundry-header-actions { gap: 5px; }
+  .trailer-link { width: 36px; padding: 0; justify-content: center; }
+  .trailer-link span { display: none; }
+  .trailer-modal { padding: 8px; }
+  .trailer-dialog { width: 100%; }
   .foundry-command { padding: 36px 15px 34px; }
   .command-copy h1 { font-size: 43px; }
   .command-copy p { font-size: 11px; }

@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Layers3,
   LoaderCircle,
+  Play,
   Search,
   Sparkles,
   X,
@@ -164,6 +165,7 @@ export default function FoundryHome() {
   const [buildSubject, setBuildSubject] = useState('');
   const [buildJournal, setBuildJournal] = useState<BuildJournalEntry[]>([]);
   const [notice, setNotice] = useState('');
+  const [trailerOpen, setTrailerOpen] = useState(false);
   const lastExplosionEventRef = useRef(-1);
 
   const archiveLayers = useMemo(() => atlas.archive?.layers.map((layer) => layer.label) ?? [], [atlas.archive]);
@@ -248,6 +250,13 @@ export default function FoundryHome() {
     }, 600);
     return () => window.clearTimeout(timeout);
   }, [activeLayer, atlas.subject, explode]);
+
+  useEffect(() => {
+    if (!trailerOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setTrailerOpen(false); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [trailerOpen]);
 
   function loadAtlas(nextAtlas: FoundryAtlas, message: string) {
     setAtlas(nextAtlas);
@@ -451,12 +460,15 @@ export default function FoundryHome() {
     <main className="foundry-shell">
       <div className="foundry-grain" />
       <header className="foundry-header">
-        <Link className="foundry-brand" href="/" aria-label="Atlas Foundry home">
+        <Link className="foundry-brand" href="/" aria-label="Explode Anything home">
           <span className="foundry-brand-mark"><i /><i /><i /></span>
-          <span><strong>ATLAS</strong><small>FOUNDRY / 01</small></span>
+          <span><strong>EXPLODE</strong><small>ANYTHING / 01</small></span>
         </Link>
         <div className="foundry-header-note"><span>RESEARCH</span><i /><span>ASSEMBLE</span><i /><span>EXPLORE</span></div>
-        <Link className="human-link" href="/human"><Box /> Verified 3D human atlas <ChevronRight /></Link>
+        <div className="foundry-header-actions">
+          <button type="button" className="trailer-link" onClick={() => setTrailerOpen(true)}><Play /> <span>Watch trailer</span></button>
+          <Link className="human-link" href="/human"><Box /> <span>Verified 3D human atlas</span> <ChevronRight /></Link>
+        </div>
       </header>
 
       <section className="foundry-command" aria-label="Create an atlas">
@@ -842,6 +854,15 @@ export default function FoundryHome() {
         <div><span className="foundry-section-number">03 / RESEARCH NOTE</span><p>{atlas.summary}</p></div>
         <div className="source-register"><span className="foundry-section-number">SOURCE REGISTER</span>{atlas.sources.map((source, index) => <a key={source.id} href={source.url} target="_blank" rel="noreferrer"><i>{String(index + 1).padStart(2, '0')}</i><span>{source.publisher}</span><ExternalLink /></a>)}</div>
       </section>
+
+      {trailerOpen ? (
+        <div className="trailer-modal" role="presentation" onClick={() => setTrailerOpen(false)}>
+          <section className="trailer-dialog" role="dialog" aria-modal="true" aria-label="Explode Anything trailer" onClick={(event) => event.stopPropagation()}>
+            <div className="trailer-dialog-head"><span>EXPLODE ANYTHING / 27 SECOND TOUR</span><button type="button" onClick={() => setTrailerOpen(false)} aria-label="Close trailer"><X /></button></div>
+            <video src="/video/explode-anything-trailer.mp4" controls autoPlay playsInline preload="metadata" poster="/video/trailer-poster.jpg" />
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
