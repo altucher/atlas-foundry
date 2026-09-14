@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
+import Link from 'next/link';
 import {
   ArrowRight,
   BookOpen,
@@ -18,7 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
-import { TESLA_DEMO, type AtlasPart, type FoundryAtlas } from './foundry-data';
+import { TESLA_DEMO, type AtlasGalleryItem, type AtlasPart, type FoundryAtlas } from './foundry-data';
 
 const examples = ['Falcon 9', 'Tesla', 'espresso machine', 'DSLR camera', 'a male human body'];
 
@@ -27,7 +28,7 @@ function supplierSummary(part: AtlasPart) {
   if (!suppliers.length) return '';
   const first = suppliers[0];
   const prefix = first.relationshipStatus === 'confirmed' ? '' : `${first.relationshipStatus.toUpperCase()} · `;
-  return `${prefix}${first.company} · ${first.ticker}${suppliers.length > 1 ? ` +${suppliers.length - 1}` : ''}`;
+  return `${prefix}${first.company}${first.ticker ? ` · ${first.ticker}` : ''}${suppliers.length > 1 ? ` +${suppliers.length - 1}` : ''}`;
 }
 
 function supplierStatusLabel(status: NonNullable<AtlasPart['suppliers']>[number]['relationshipStatus']) {
@@ -63,6 +64,12 @@ function sourceForPart(atlas: FoundryAtlas, part: AtlasPart) {
   return atlas.sources.filter((source) => part.sourceUrls.includes(source.url));
 }
 
+type VendorEntry = {
+  company: string;
+  ticker: string | null;
+  partIds: string[];
+};
+
 export default function FoundryHome() {
   const compact = useCompactLayout();
   const [prompt, setPrompt] = useState('Tesla');
@@ -71,28 +78,98 @@ export default function FoundryHome() {
   const [selectedId, setSelectedId] = useState(TESLA_DEMO.parts[0].id);
   const [activeSystem, setActiveSystem] = useState('All systems');
   const [partQuery, setPartQuery] = useState('');
+  const [activeVendor, setActiveVendor] = useState<string | null>(null);
+  const [vendorsOpen, setVendorsOpen] = useState(false);
+  const [gallery, setGallery] = useState<AtlasGalleryItem[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [notice, setNotice] = useState('');
 
   const systems = useMemo(() => ['All systems', ...Array.from(new Set(atlas.parts.map((part) => part.system)))], [atlas]);
+  const vendors = useMemo(() => {
+    const entries = new Map<string, VendorEntry>();
+    for (const part of atlas.parts) {
+      for (const supplier of part.suppliers ?? []) {
+        const key = supplier.company.toLowerCase();
+        const current = entries.get(key) ?? { company: supplier.company, ticker: supplier.ticker, partIds: [] };
+        if (!current.partIds.includes(part.id)) current.partIds.push(part.id);
+        if (!current.ticker && supplier.ticker) current.ticker = supplier.ticker;
+        entries.set(key, current);
+      }
+    }
+    return [...entries.values()].sort((a, b) => a.company.localeCompare(b.company));
+  }, [atlas.parts]);
   const visibleParts = useMemo(() => {
     const term = partQuery.trim().toLowerCase();
     return atlas.parts.filter((part) => {
       const inSystem = activeSystem === 'All systems' || part.system === activeSystem;
-      const supplierTerms = (part.suppliers ?? []).map((supplier) => `${supplier.company} ${supplier.ticker} ${supplier.relationshipStatus}`).join(' ');
+      const inVendor = !activeVendor || (part.suppliers ?? []).some((supplier) => supplier.company === activeVendor);
+      const supplierTerms = (part.suppliers ?? []).map((supplier) => `${supplier.company} ${supplier.ticker ?? ''} ${supplier.relationshipStatus}`).join(' ');
       const matches = !term || `${part.name} ${part.system} ${part.sourceId} ${supplierTerms}`.toLowerCase().includes(term);
-      return inSystem && matches;
+      return inSystem && inVendor && matches;
     });
-  }, [activeSystem, atlas.parts, partQuery]);
+  }, [activeSystem, activeVendor, atlas.parts, partQuery]);
   const selectedPart = atlas.parts.find((part) => part.id === selectedId) ?? visibleParts[0] ?? atlas.parts[0];
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
   const hasIllustratedExplosion = Boolean(atlas.explodedImage);
   const showingEveryPart = visibleParts.length === atlas.parts.length;
-  const supplierCount = new Set(atlas.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.yahooSymbol.toUpperCase()))).size;
+  const supplierCount = vendors.length;
+
+  async function refreshGallery() {
+    try {
+      const response = await fetch('/api/gallery', { cache: 'no-store' });
+      const payload = await response.json() as { items?: AtlasGalleryItem[] };
+      if (response.ok) setGallery(payload.items ?? []);
+    } catch {
+      // The two curated editions remain available if shared storage is offline.
+    } finally {
+      setGalleryLoading(false);
+    }
+  }
 
   useEffect(() => {
-    if (!visibleParts.some((part) => part.id === selectedId) && visibleParts[0]) setSelectedId(visibleParts[0].id);
-  }, [selectedId, visibleParts]);
+    fetch('/api/gallery', { cache: 'no-store' })
+      .then(async (response) => ({ response, payload: await response.json() as { items?: AtlasGalleryItem[] } }))
+      .then(({ response, payload }) => { if (response.ok) setGallery(payload.items ?? []); })
+      .catch(() => undefined)
+      .finally(() => setGalleryLoading(false));
+  }, []);
+
+  function loadAtlas(nextAtlas: FoundryAtlas, message: string) {
+    setAtlas(nextAtlas);
+    setExplode(0);
+    setActiveSystem('All systems');
+    setActiveVendor(null);
+    setPartQuery('');
+    setSelectedId(nextAtlas.parts[0]?.id ?? '');
+    setNotice(message);
+  }
+
+  async function openGalleryAtlas(item: AtlasGalleryItem) {
+    setGenerating(true);
+    setNotice(`Opening ${item.subject} from the shared gallery…`);
+    try {
+      const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store' });
+      const payload = await response.json() as { atlas?: FoundryAtlas; error?: string };
+      if (!response.ok || !payload.atlas) throw new Error(payload.error ?? 'That gallery atlas is temporarily unavailable.');
+      loadAtlas(payload.atlas, 'Loaded instantly from the shared gallery. No research or rendering was needed.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'That gallery atlas is temporarily unavailable.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function chooseVendor(vendor: VendorEntry) {
+    const nextVendor = activeVendor === vendor.company ? null : vendor.company;
+    setActiveVendor(nextVendor);
+    setActiveSystem('All systems');
+    setPartQuery('');
+    if (nextVendor) {
+      setSelectedId(vendor.partIds[0] ?? '');
+      setExplode(1);
+    }
+  }
 
   async function buildAtlas(event: FormEvent) {
     event.preventDefault();
@@ -103,12 +180,7 @@ export default function FoundryHome() {
       return;
     }
     if (/\btesla\b/i.test(subject)) {
-      setAtlas(TESLA_DEMO);
-      setExplode(0);
-      setActiveSystem('All systems');
-      setPartQuery('');
-      setSelectedId(TESLA_DEMO.parts[0].id);
-      setNotice('Loaded the curated Tesla systems demo. Use a different subject to test live research.');
+      loadAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.');
       return;
     }
     setGenerating(true);
@@ -119,19 +191,22 @@ export default function FoundryHome() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: subject }),
       });
-      const payload = (await response.json()) as { atlas?: FoundryAtlas; error?: string; code?: string; imageWarning?: string };
+      const payload = (await response.json()) as { atlas?: FoundryAtlas; error?: string; code?: string; imageWarning?: string; cacheWarning?: string; cached?: boolean };
       if (!response.ok || !payload.atlas) {
         if (payload.code === 'NOT_CONFIGURED') {
           throw new Error('Live generation needs an OPENAI_API_KEY on the server. The curated Tesla and verified human atlases are ready to show now.');
         }
         throw new Error(payload.error ?? 'The atlas could not be generated.');
       }
-      setAtlas(payload.atlas);
-      setExplode(0);
-      setActiveSystem('All systems');
-      setPartQuery('');
-      setSelectedId(payload.atlas.parts[0]?.id ?? '');
-      setNotice(payload.imageWarning ? `Research complete. ${payload.imageWarning}` : 'Research and photorealistic exploded views complete. Select any numbered component to inspect it.');
+      const completion = payload.cached
+        ? 'Loaded instantly from the shared gallery. No research or rendering was needed.'
+        : payload.imageWarning
+          ? `Research complete. ${payload.imageWarning}`
+          : payload.cacheWarning
+            ? `Research and rendering complete. ${payload.cacheWarning}`
+            : 'Research, rendering, and gallery save complete. Select any numbered component to inspect it.';
+      loadAtlas(payload.atlas, completion);
+      if (!payload.cached) void refreshGallery();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'The atlas could not be generated.');
     } finally {
@@ -146,12 +221,12 @@ export default function FoundryHome() {
     <main className="foundry-shell">
       <div className="foundry-grain" />
       <header className="foundry-header">
-        <a className="foundry-brand" href="/" aria-label="Atlas Foundry home">
+        <Link className="foundry-brand" href="/" aria-label="Atlas Foundry home">
           <span className="foundry-brand-mark"><i /><i /><i /></span>
           <span><strong>ATLAS</strong><small>FOUNDRY / 01</small></span>
-        </a>
+        </Link>
         <div className="foundry-header-note"><span>RESEARCH</span><i /><span>ASSEMBLE</span><i /><span>EXPLORE</span></div>
-        <a className="human-link" href="/human"><Box /> Verified 3D human atlas <ChevronRight /></a>
+        <Link className="human-link" href="/human"><Box /> Verified 3D human atlas <ChevronRight /></Link>
       </header>
 
       <section className="foundry-command" aria-label="Create an atlas">
@@ -176,6 +251,34 @@ export default function FoundryHome() {
         {notice && <button type="button" className="foundry-notice" onClick={() => setNotice('')}><CircleAlert /> <span>{notice}</span><X /></button>}
       </section>
 
+      <section className="foundry-gallery" aria-label="Saved atlas gallery">
+        <div className="foundry-gallery-head">
+          <div><span className="foundry-section-number">SAVED / SHARED GALLERY</span><h2>Ready to open instantly</h2></div>
+          <small>{galleryLoading ? 'CHECKING ARCHIVE…' : `${gallery.length + 2} ATLASES AVAILABLE`}</small>
+        </div>
+        <div className="foundry-gallery-track">
+          <button type="button" className="foundry-gallery-card" onClick={() => loadAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.')}>
+            <span className="gallery-image"><img src="/tesla-exploded-v2.jpg" alt="Exploded Tesla systems atlas" /></span>
+            <span className="gallery-card-copy"><small>CURATED / ENGINEERED PRODUCT</small><strong>Tesla</strong><em>{TESLA_DEMO.parts.length} parts · {new Set(TESLA_DEMO.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.company))).size} vendors</em></span>
+            <ChevronRight />
+          </button>
+          <Link className="foundry-gallery-card" href="/human">
+            <span className="gallery-image portrait"><img src="/og.png" alt="Verified adult male anatomy atlas" /></span>
+            <span className="gallery-card-copy"><small>VERIFIED / BODYParts3D</small><strong>Adult male anatomy</strong><em>Official mesh edition</em></span>
+            <ChevronRight />
+          </Link>
+          {gallery.map((item) => (
+            <button type="button" className="foundry-gallery-card" key={item.cacheKey} onClick={() => void openGalleryAtlas(item)} disabled={generating}>
+              <span className={`gallery-image${item.imageOrientation === 'portrait' ? ' portrait' : ''}`}>
+                {item.explodedImage ?? item.image ? <img src={item.explodedImage ?? item.image} alt={`Exploded ${item.subject} atlas`} /> : <Box />}
+              </span>
+              <span className="gallery-card-copy"><small>SAVED / {item.category}</small><strong>{item.subject}</strong><em>{item.partCount} parts · {item.supplierCount} vendors</em></span>
+              <ChevronRight />
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="foundry-workbench" aria-label={`${atlas.subject} component atlas`}>
         <aside className="foundry-index">
           <div className="foundry-section-number">01 / INDEX</div>
@@ -192,21 +295,36 @@ export default function FoundryHome() {
             {systems.map((system) => {
               const count = system === 'All systems' ? atlas.parts.length : atlas.parts.filter((part) => part.system === system).length;
               return (
-                <button type="button" key={system} className={activeSystem === system ? 'active' : ''} onClick={() => setActiveSystem(system)}>
+                <button type="button" key={system} className={activeSystem === system && !activeVendor ? 'active' : ''} onClick={() => { setActiveSystem(system); setActiveVendor(null); }}>
                   <span>{system}</span><small>{String(count).padStart(2, '0')}</small>
                 </button>
               );
             })}
           </div>
+          <div className={`foundry-vendor-index${vendorsOpen ? ' open' : ''}`}>
+            <button type="button" className="vendor-index-toggle" onClick={() => setVendorsOpen((open) => !open)} aria-expanded={vendorsOpen}>
+              <span>VENDORS</span><small>{String(vendors.length).padStart(2, '0')}</small><ChevronRight />
+            </button>
+            {vendorsOpen && (
+              <div className="vendor-index-list">
+                {vendors.length ? vendors.map((vendor) => (
+                  <button type="button" key={vendor.company} className={activeVendor === vendor.company ? 'active' : ''} onClick={() => chooseVendor(vendor)}>
+                    <span><strong>{vendor.company}</strong><em>{vendor.ticker ?? 'PRIVATE'}</em></span>
+                    <small>{vendor.partIds.length} {vendor.partIds.length === 1 ? 'PART' : 'PARTS'}</small>
+                  </button>
+                )) : <p>No sourced vendors for this atlas.</p>}
+              </div>
+            )}
+          </div>
           <div className="foundry-mode">
             <i className={atlas.mode === 'generated' ? 'generated' : ''} />
-            <span><strong>{atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} components{supplierCount ? ` · ${supplierCount} public suppliers` : ''}</small></span>
+            <span><strong>{atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} components{supplierCount ? ` · ${supplierCount} vendors` : ''}</small></span>
           </div>
         </aside>
 
         <section className="foundry-stage">
           <div className="foundry-stage-head">
-            <span>{stageInstruction}</span>
+            <span>{activeVendor ? `${activeVendor.toUpperCase()} SUPPLY MAP · CLICK A PART` : stageInstruction}</span>
             <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
           </div>
           <div className="foundry-stage-grid" aria-hidden="true" />
@@ -287,7 +405,7 @@ export default function FoundryHome() {
                       } as CSSProperties}
                       disabled={explode < 0.12}
                       onClick={() => setSelectedId(part.id)}
-                      aria-label={`Select ${part.name}${part.suppliers?.length ? `, with ${part.suppliers.length} public supplier ${part.suppliers.length === 1 ? 'record' : 'records'}` : ''}`}
+                      aria-label={`Select ${part.name}${part.suppliers?.length ? `, with ${part.suppliers.length} supplier ${part.suppliers.length === 1 ? 'record' : 'records'}` : ''}`}
                       aria-pressed={active}
                     >
                       <i>{String(partIndex + 1).padStart(2, '0')}</i>
@@ -340,21 +458,23 @@ export default function FoundryHome() {
               </dl>
               {selectedPart.suppliers?.length ? (
                 <div className="foundry-suppliers">
-                  <span>PUBLIC COMPANY SUPPLIERS / VENDORS</span>
+                  <span>SUPPLIERS / VENDORS</span>
                   {selectedPart.suppliers.map((supplier) => (
-                    <div className={`foundry-supplier ${supplier.relationshipStatus}`} key={`${supplier.yahooSymbol}-${supplier.relationshipStatus}`}>
+                    <div className={`foundry-supplier ${supplier.relationshipStatus}`} key={`${supplier.company}-${supplier.relationshipStatus}-${supplier.note}`}>
                       <div className="supplier-heading">
                         <i>{supplierStatusLabel(supplier.relationshipStatus)}</i>
                         <strong>{supplier.company}</strong>
-                        <small>{supplier.exchange} · {supplier.ticker}</small>
+                        <small>{supplier.isPublicCompany ? `${supplier.exchange} · ${supplier.ticker}` : 'PRIVATE COMPANY · NO PUBLIC TICKER'}</small>
                       </div>
                       <p>{supplier.note}</p>
-                      <a href={supplier.financeUrl} target="_blank" rel="noreferrer" aria-label={`View ${supplier.company} on Yahoo Finance`}>
-                        YAHOO FINANCE <ExternalLink />
-                      </a>
+                      {supplier.financeUrl ? (
+                        <a href={supplier.financeUrl} target="_blank" rel="noreferrer" aria-label={`View ${supplier.company} on Yahoo Finance`}>
+                          YAHOO FINANCE <ExternalLink />
+                        </a>
+                      ) : <span className="supplier-private">PRIVATE VENDOR</span>}
                     </div>
                   ))}
-                  <p className="supplier-disclaimer">Reported and rumor labels are claims from the linked source—not confirmation or investment advice.</p>
+                  <p className="supplier-disclaimer">Supplier relationships can vary by generation, model year, trim, market, and plant. Reported and rumor labels are sourced claims—not confirmation or investment advice.</p>
                 </div>
               ) : null}
               <div className="foundry-citations">

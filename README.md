@@ -26,6 +26,8 @@ npm run dev
 
 Add a server-side `OPENAI_API_KEY` to `.env.local` to enable direct OpenAI generation locally, or use an `AI_GATEWAY_API_KEY` for Vercel AI Gateway. Credentials are used only by `app/api/generate-atlas/route.ts` and are never sent to the browser. Without a credential, the curated Tesla systems demo and full human atlas remain usable.
 
+Generated atlases are saved to the shared gallery when the deployment has a Vercel Blob store linked. Set `ATLAS_CACHE_ORIGIN` on a secondary deployment to the canonical Vercel URL to make it use the same authenticated generator and gallery without copying an OpenAI credential.
+
 Production checks:
 
 ```bash
@@ -39,8 +41,8 @@ npm run build
 
 ## Product modes
 
-- **Generated atlas:** web research with cited first-party or authoritative sources, 8–16 records for simple objects or 18–30 records for complex machines, a high-quality photorealistic assembled/exploded image pair, independently animated visual component layers, full-component click regions, system filters, component search, continuous explosion control, and multiple source-backed public-company supplier/ticker labels with Yahoo Finance links.
-- **Curated demo:** a ready-to-show Tesla electric-vehicle systems overview with paired assembled/exploded studio illustrations and twelve clickable component regions. It is explicitly conceptual and varies by model/year/trim; the hotspots are a visual index, not service geometry.
+- **Generated atlas:** web research with cited first-party or authoritative sources, 10–20 records for simple objects or 24–40 records for complex machines, a high-quality photorealistic assembled/exploded image pair, independently animated visual component layers, full-component click regions, system and vendor filters, component search, continuous explosion control, and multiple source-backed private or public supplier records. Public companies receive Yahoo Finance links.
+- **Curated demo:** a ready-to-show cross-generation Tesla electric-vehicle systems overview with paired assembled/exploded studio illustrations and twelve clickable component regions. Supplier notes identify the generation, model year, trim, market, or plant supported by each source. It is explicitly conceptual; the hotspots are a visual index, not service geometry.
 - **Verified 3D edition:** the `/human` route uses identity-preserving BodyParts3D source meshes, GPU per-part transforms, geometric picking, and true visible-only exploded packing.
 
 Generated imagery is a visual navigation aid. It does not reveal hidden geometry, and component cards should not be interpreted as spatially exact callouts. Potentially dangerous teardown instructions are excluded by the research prompt.
@@ -52,6 +54,8 @@ app/
   page.tsx                    Generic Atlas Foundry workbench
   foundry-data.ts             Shared schema and curated Tesla demo
   api/generate-atlas/route.ts Server-side web research and image generation
+  api/gallery/route.ts        Shared cached-atlas/gallery API
+  atlas-store.ts              Stable cache keys and Vercel Blob persistence
   human/page.tsx              Full BodyParts3D interface
   anatomy.ts                  Human system taxonomy and catalog types
   scene.tsx                   Three.js batching, picking, and camera controls
@@ -66,14 +70,15 @@ public/ATTRIBUTION.md         Anatomy data license and adaptation details
 
 `POST /api/generate-atlas` accepts `{ "prompt": "…" }` and performs two server-side operations:
 
-1. The OpenAI Responses API researches the public web and returns a strict component-atlas schema with up to 30 components and 24 supporting HTTPS sources. Complex products retain documented second-level assemblies instead of being reduced to a short exterior overview.
-2. For engineered products, each component may list multiple publicly traded suppliers. Every relationship is visibly classified as **confirmed**, **reported**, or **rumored**, includes a claim-specific source and applicability note, and receives a server-derived Yahoo Finance URL. A rumor must be a published claim; unsupported model inference is discarded.
+1. The OpenAI Responses API researches the public web and returns a strict component-atlas schema with up to 40 components and 32 supporting HTTPS sources. Complex products retain documented second- and third-level assemblies and readable micro-components instead of being reduced to a short exterior overview.
+2. For engineered products, each component may list multiple private or publicly traded suppliers. Every relationship is visibly classified as **confirmed**, **reported**, or **rumored**, includes a claim-specific source and a generation/model-year/trim/market/plant applicability note when available. Public companies receive a server-derived Yahoo Finance URL; private suppliers are clearly labeled. A rumor must be a published claim; unsupported model inference is discarded.
 3. The Images API renders matched high-quality assembled and exhaustive exploded studio views in parallel, using portrait plates for strongly vertical subjects such as launch vehicles.
 4. A vision pass locates each researched part in the exploded image and attaches its source-backed record to a clickable hotspot. If visual generation or localization fails, the researched catalog still returns with a deterministic non-overlapping inventory fallback.
+5. The completed atlas and its image pair are stored under a normalized subject key in Vercel Blob. A repeated prompt is served from the shared gallery before any research or image generation runs.
 
 The UI packs only the currently visible records, interpolating them from the assembled center into a responsive desktop or two-column mobile inventory. Search and system filters recompute the layout, so filtered parts do not leave gaps or overlap.
 
-Generated results are transient and are not written to a database. Add persistence or object storage before offering saved public atlas URLs.
+The gallery is shared by all visitors to the canonical deployment. It is a cache of generated educational artifacts, not an assertion that all changing supplier relationships remain current forever; source and applicability notes remain visible on every saved record.
 
 ## BodyParts3D data pipeline
 
