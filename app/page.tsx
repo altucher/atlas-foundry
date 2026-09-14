@@ -135,6 +135,11 @@ export default function FoundryHome() {
       return inLayer && inSystem && inVendor && matches;
     });
   }, [activeLayer, activeSystem, activeVendor, atlas.parts, partQuery]);
+  const inventoryLayoutParts = useMemo(
+    () => activeLayer === 'All layers' ? atlas.parts : atlas.parts.filter((part) => (part.archiveLayer ?? 'Overview') === activeLayer),
+    [activeLayer, atlas.parts],
+  );
+  const visiblePartIds = useMemo(() => new Set(visibleParts.map((part) => part.id)), [visibleParts]);
   const selectedPart = atlas.parts.find((part) => part.id === selectedId);
   const auditedPartCount = atlas.parts.filter((part) => part.supplierResearch && part.supplierResearch.status !== 'incomplete').length;
   const sourcedPartCount = atlas.parts.filter((part) => part.suppliers?.length).length;
@@ -144,7 +149,10 @@ export default function FoundryHome() {
     return part ? [{ connection, part }] : [];
   });
   const hasIllustratedExplosion = Boolean(atlas.explodedImage) && (!atlas.archive || activeLayer === 'Overview');
-  const showingEveryPart = visibleParts.every((part) => (part.archiveLayer ?? 'Overview') === 'Overview');
+  const showingEveryPart = activeSystem === 'All systems'
+    && !activeVendor
+    && !partQuery.trim()
+    && visibleParts.length === inventoryLayoutParts.length;
   const supplierCount = vendors.length;
   // Ease the illustrated regions outward early so the intermediate view reads as
   // a product coming apart, rather than every component shrinking into one pile.
@@ -467,8 +475,8 @@ export default function FoundryHome() {
                 alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`}
                 style={{
                   opacity: showingEveryPart
-                    ? Math.max(0, Math.min(1, (explode - 0.82) / 0.18))
-                    : Math.max(0, Math.min(0.28, (explode - 0.12) * 0.42)),
+                    ? Math.max(0, Math.min(1, (explode - 0.7) / 0.3))
+                    : Math.max(0, Math.min(0.72, (explode - 0.1) * 1.15)),
                 }}
               />
               {selectedPart && selectedConnections.length > 0 && !activeVendor && (
@@ -556,10 +564,28 @@ export default function FoundryHome() {
             </div>
           )}
           {!hasIllustratedExplosion && <div className="foundry-parts" aria-label="Clickable component inventory">
-            {visibleParts.map((part, index) => {
-              const target = targetPosition(index, visibleParts.length, compact);
-              const left = 50 + (target.x - 50) * explode;
-              const top = 50 + (target.y - 50) * explode;
+            {inventoryLayoutParts.filter((part) => !visiblePartIds.has(part.id)).map((part, index) => {
+              const layoutIndex = inventoryLayoutParts.findIndex((candidate) => candidate.id === part.id);
+              const target = targetPosition(layoutIndex, inventoryLayoutParts.length, compact);
+              const left = 50 + (target.x - 50) * explosionSpread;
+              const top = 50 + (target.y - 50) * explosionSpread;
+              return (
+                <div
+                  aria-hidden="true"
+                  key={`${part.id}-context`}
+                  className="foundry-part-node context"
+                  style={{ left: `${left}%`, top: `${top}%`, opacity: Math.min(0.2, Math.max(0, (explode - 0.08) * 0.5)), '--part-color': part.color } as CSSProperties}
+                >
+                  <i>{String(layoutIndex + 1).padStart(2, '0')}</i>
+                  <span><strong>{part.name}</strong><small>{part.system}</small></span>
+                </div>
+              );
+            })}
+            {visibleParts.map((part) => {
+              const layoutIndex = inventoryLayoutParts.findIndex((candidate) => candidate.id === part.id);
+              const target = targetPosition(layoutIndex, inventoryLayoutParts.length, compact);
+              const left = 50 + (target.x - 50) * explosionSpread;
+              const top = 50 + (target.y - 50) * explosionSpread;
               const active = part.id === selectedPart?.id;
               return (
                 <button
@@ -570,7 +596,7 @@ export default function FoundryHome() {
                   disabled={explode < 0.12}
                   onClick={() => setSelectedId(part.id)}
                 >
-                  <i>{String(index + 1).padStart(2, '0')}</i>
+                  <i>{String(layoutIndex + 1).padStart(2, '0')}</i>
                   <span><strong>{part.name}</strong><small>{supplierSummary(part) || part.system}</small></span>
                 </button>
               );

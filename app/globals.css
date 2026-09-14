@@ -609,3 +609,72 @@ a { color: inherit; }
   .foundry-footnotes > div + div { border-top: 1px solid var(--foundry-line); border-left: 0; }
   .foundry-footnotes > div:last-child { grid-column: auto; }
 }
+
+/* Readable catalog typography: retain the quiet hierarchy without relying on
+   sub-8px gray labels that disappear on laptop and mobile displays. */
+.foundry-brand small,
+.foundry-header-note,
+.foundry-section-number,
+.foundry-gallery-head > small,
+.foundry-stage-head,
+.foundry-layer-index > span,
+.vendor-index-toggle,
+.foundry-slider-labels,
+.foundry-art-badge,
+.foundry-object-overview .overview-archive-note,
+.foundry-suppliers > span,
+.foundry-connections-list > span,
+.foundry-citations > span { color: #96988f; font-size: 8px; }
+
+.gallery-card-copy small,
+.gallery-card-copy em,
+.foundry-layer-index > button,
+.foundry-layer-index small,
+.foundry-system-list small,
+.vendor-index-toggle small,
+.vendor-index-list em,
+.vendor-index-list small,
+.vendor-index-list > p,
+.vendor-index-list > p.vendor-coverage,
+.foundry-mode small,
+.build-journal-feed i,
+.foundry-build-journal > small,
+.foundry-hotspot > i,
+.foundry-hotspot > span small,
+.foundry-part-node > i,
+.foundry-part-node small,
+.foundry-slider output,
+.detail-index-row code,
+.foundry-detail dt,
+.foundry-detail dd,
+.supplier-audit > span,
+.supplier-heading i,
+.foundry-supplier small,
+.foundry-supplier a,
+.supplier-private,
+.foundry-connections-list > button > i,
+.foundry-connections-list small,
+.foundry-citations small,
+.source-register a i { font-size: 8px; }
+
+.foundry-subject p,
+.foundry-mode strong,
+.vendor-index-list strong,
+.detail-index-row small,
+.supplier-audit > strong,
+.foundry-supplier strong,
+.foundry-connections-list strong,
+.source-register a { font-size: 9px; }
+
+.foundry-system-list button,
+.foundry-object-overview .overview-instruction,
+.supplier-audit > p,
+.foundry-supplier > p,
+.foundry-suppliers > .supplier-disclaimer,
+.foundry-connections-list small,
+.foundry-citations small { color: #999b92; }
+
+.foundry-detail > p,
+.foundry-object-overview > p { color: #b2b2a8; font-size: 12px; }
+
+.foundry-part-node.context { pointer-events: none; filter: grayscale(.7); box-shadow: none; }
