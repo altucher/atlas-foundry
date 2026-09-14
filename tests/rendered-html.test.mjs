@@ -24,6 +24,7 @@ test("server-renders the Atlas Foundry workbench", async () => {
   assert.match(html, /EXPLODE/);
   assert.match(html, /ANYTHING \/ 01/);
   assert.match(html, /Watch trailer/);
+  assert.match(html, /Share Tesla electric vehicle explosion/);
   assert.match(html, /What do you want to/);
   assert.match(html, /SAVED \/ SHARED GALLERY/);
   assert.match(html, /VENDORS/);
@@ -35,8 +36,9 @@ test("server-renders the Atlas Foundry workbench", async () => {
 });
 
 test("keeps credentials server-side and implements shared gallery storage", async () => {
-  const [page, generationRoute, galleryRoute, store] = await Promise.all([
+  const [page, humanPage, generationRoute, galleryRoute, store] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/human/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/generate-atlas/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/gallery/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/atlas-store.ts", import.meta.url), "utf8"),
@@ -104,6 +106,10 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /RESEARCH LAYERS/);
   assert.match(page, /RESEARCH REFRESH/);
   assert.match(page, /foundry-connection-lines/);
+  assert.match(page, /atlas_share/);
+  assert.match(page, /Share \$\{atlas\.subject\} explosion/);
+  assert.match(humanPage, /Share anatomy explosion/);
+  assert.match(humanPage, /selection/);
 });
 
 test("ships encrypted, private analytics without exposing the admin secret", async () => {

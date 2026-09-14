@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   Box,
+  Check,
   ChevronRight,
   CircleHelp,
   Focus,
@@ -13,6 +14,7 @@ import {
   RotateCcw,
   RotateCw,
   Search,
+  Share2,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -79,6 +81,7 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [selectedLabel, setSelectedLabel] = useState<{ name: string; id: string } | null>(null);
+  const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared'>('idle');
 
   useEffect(() => {
     const abort = new AbortController();
@@ -106,6 +109,36 @@ export default function Home() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedExplosion = Number(params.get('explode'));
+    const requestedView = params.get('view') as View | null;
+    const requestedVisible = params.get('visible')?.split(',').filter((id): id is SystemId => SYSTEMS.some((system) => system.id === id));
+    setState((current) => ({
+      ...current,
+      explode: Number.isFinite(requestedExplosion) ? Math.max(0, Math.min(1, requestedExplosion / 100)) : current.explode,
+      visible: requestedVisible?.length ? requestedVisible : current.visible,
+      isolate: params.get('isolate') === '1',
+      view: requestedView && views.some((view) => view.id === requestedView) ? requestedView : current.view,
+      rotate: false,
+    }));
+  }, []);
+
+  useEffect(() => {
+    if (!atlas) return;
+    const selection = new URLSearchParams(window.location.search).get('selection');
+    if (!selection) return;
+    const concept = atlas.concepts.find((candidate) => candidate.id === selection);
+    const part = atlas.parts.find((candidate) => candidate.id === selection);
+    if (concept) {
+      setSelectedLabel({ name: concept.name, id: concept.id });
+      setState((current) => ({ ...current, selected: concept.elements }));
+    } else if (part) {
+      setSelectedLabel({ name: part.name, id: part.conceptId || part.id });
+      setState((current) => ({ ...current, selected: [part.id] }));
+    }
+  }, [atlas]);
 
   const partsById = useMemo(() => new Map(atlas?.parts.map((part) => [part.id, part])), [atlas]);
   const activeSystems = useMemo(
@@ -200,6 +233,29 @@ export default function Home() {
     setQuery('');
   };
 
+  const shareAnatomy = async () => {
+    const url = new URL('/human', window.location.origin);
+    url.searchParams.set('explode', String(Math.round(state.explode * 100)));
+    url.searchParams.set('visible', state.visible.join(','));
+    url.searchParams.set('view', state.view);
+    if (state.isolate) url.searchParams.set('isolate', '1');
+    if (selectedLabel?.id ?? selectedPart?.id) url.searchParams.set('selection', selectedLabel?.id ?? selectedPart?.id ?? '');
+    const useNativeShare = typeof navigator.share === 'function';
+    try {
+      if (useNativeShare) {
+        await navigator.share({ title: 'Adult male anatomy — Explode Anything', text: 'Explore this interactive anatomy explosion.', url: url.toString() });
+        setShareStatus('shared');
+      } else {
+        await navigator.clipboard.writeText(url.toString());
+        setShareStatus('copied');
+      }
+      window.setTimeout(() => setShareStatus('idle'), 2200);
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError') return;
+      window.prompt('Copy this anatomy link', url.toString());
+    }
+  };
+
   const selectedDescription = selectedPart
     ? explanation(selectedLabel?.name ?? selectedPart.name, selectedPart.system)
     : '';
@@ -230,6 +286,9 @@ export default function Home() {
       <nav className="utility-nav" aria-label="Atlas utilities">
         <Button variant="outline" onClick={() => setPanel(panel === 'search' ? null : 'search')} aria-label="Search structures">
           <Search /> <span>Search atlas</span> <kbd>/</kbd>
+        </Button>
+        <Button variant="outline" onClick={() => void shareAnatomy()} aria-label="Share anatomy explosion">
+          {shareStatus === 'idle' ? <Share2 /> : <Check />} <span>{shareStatus === 'shared' ? 'Shared' : shareStatus === 'copied' ? 'Copied' : 'Share'}</span>
         </Button>
         <Button variant="outline" size="icon" onClick={() => setPanel(panel === 'about' ? null : 'about')} aria-label="About this atlas">
           <Info />

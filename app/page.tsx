@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   ArrowRight,
   Box,
+  Check,
   ChevronRight,
   CircleAlert,
   ExternalLink,
@@ -12,6 +13,7 @@ import {
   LoaderCircle,
   Play,
   Search,
+  Share2,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -166,6 +168,7 @@ export default function FoundryHome() {
   const [buildJournal, setBuildJournal] = useState<BuildJournalEntry[]>([]);
   const [notice, setNotice] = useState('');
   const [trailerOpen, setTrailerOpen] = useState(false);
+  const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared'>('idle');
   const lastExplosionEventRef = useRef(-1);
 
   const archiveLayers = useMemo(() => atlas.archive?.layers.map((layer) => layer.label) ?? [], [atlas.archive]);
@@ -239,6 +242,60 @@ export default function FoundryHome() {
       .then(({ response, payload }) => { if (response.ok) setGallery(payload.items ?? []); })
       .catch(() => undefined)
       .finally(() => setGalleryLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const atlasKey = params.get('atlas');
+    if (!atlasKey) return;
+
+    const applyView = (nextAtlas: FoundryAtlas) => {
+      const partId = params.get('part') ?? '';
+      const requestedLayer = params.get('layer');
+      const requestedSystem = params.get('system');
+      const requestedVendor = params.get('vendor');
+      const requestedExplosion = Number(params.get('explode'));
+      if (partId && nextAtlas.parts.some((part) => part.id === partId)) setSelectedId(partId);
+      if (requestedLayer && (requestedLayer === 'All layers' || nextAtlas.archive?.layers.some((layer) => layer.label === requestedLayer))) setActiveLayer(requestedLayer);
+      if (requestedSystem && (requestedSystem === 'All systems' || nextAtlas.parts.some((part) => part.system === requestedSystem))) setActiveSystem(requestedSystem);
+      if (requestedVendor && nextAtlas.parts.some((part) => part.suppliers?.some((supplier) => supplier.company === requestedVendor))) setActiveVendor(requestedVendor);
+      if (Number.isFinite(requestedExplosion)) setExplode(Math.max(0, Math.min(1, requestedExplosion / 100)));
+      requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    };
+
+    if (atlasKey === 'tesla') {
+      setPrompt(TESLA_DEMO.subject);
+      loadAtlas(TESLA_DEMO, 'Opened a shared Tesla explosion.');
+      applyView(TESLA_DEMO);
+      trackAnalytics('shared_atlas_open', { atlas: TESLA_DEMO.subject, cacheKey: atlasKey });
+      return;
+    }
+
+    const abortController = new AbortController();
+    activeAbortRef.current = abortController;
+    const sharedSubject = params.get('subject') ?? 'Shared atlas';
+    setPrompt(sharedSubject);
+    setAtlas(pendingAtlas(sharedSubject));
+    setGenerating(true);
+    setBuildSubject(sharedSubject);
+    setBuildJournal([{ stage: 'share', message: 'Opening the shared explosion from the gallery…' }]);
+    fetch(`/api/gallery?key=${encodeURIComponent(atlasKey)}`, { cache: 'no-store', signal: abortController.signal })
+      .then(async (response) => ({ response, payload: await response.json() as { atlas?: FoundryAtlas; error?: string } }))
+      .then(({ response, payload }) => {
+        if (!response.ok || !payload.atlas || payload.atlas.cacheKey !== atlasKey) throw new Error(payload.error ?? 'This shared atlas is temporarily unavailable.');
+        loadAtlas(payload.atlas, 'Opened the shared explosion.');
+        applyView(payload.atlas);
+        trackAnalytics('shared_atlas_open', { atlas: payload.atlas.subject, cacheKey: atlasKey });
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setNotice(error instanceof Error ? error.message : 'This shared atlas is temporarily unavailable.');
+      })
+      .finally(() => {
+        setGenerating(false);
+        activeAbortRef.current = null;
+      });
+    return () => abortController.abort();
   }, []);
 
   useEffect(() => {
@@ -435,6 +492,42 @@ export default function FoundryHome() {
     }
   }
 
+  async function shareExplosion() {
+    const isTesla = atlas.mode === 'curated' && /tesla/i.test(atlas.subject);
+    const atlasKey = atlas.cacheKey ?? (isTesla ? 'tesla' : '');
+    if (!atlasKey) {
+      setNotice('This atlas is still being archived. Its share link will be ready as soon as the build finishes.');
+      return;
+    }
+    const url = new URL(window.location.origin);
+    url.searchParams.set('atlas', atlasKey);
+    url.searchParams.set('subject', atlas.subject);
+    url.searchParams.set('explode', String(Math.round(explode * 100)));
+    if (selectedPart) url.searchParams.set('part', selectedPart.id);
+    if (activeLayer !== 'All layers') url.searchParams.set('layer', activeLayer);
+    if (activeSystem !== 'All systems') url.searchParams.set('system', activeSystem);
+    if (activeVendor) url.searchParams.set('vendor', activeVendor);
+    const title = `${atlas.subject} — Explode Anything`;
+    const text = selectedPart
+      ? `Explore ${selectedPart.name} inside the ${atlas.subject} explosion.`
+      : `Explore the ${atlas.subject} component explosion.`;
+    const useNativeShare = typeof navigator.share === 'function';
+    try {
+      if (useNativeShare) {
+        await navigator.share({ title, text, url: url.toString() });
+        setShareStatus('shared');
+      } else {
+        await navigator.clipboard.writeText(url.toString());
+        setShareStatus('copied');
+      }
+      trackAnalytics('atlas_share', { atlas: atlas.subject, component: selectedPart?.name ?? null, amount: Math.round(explode * 100), method: useNativeShare ? 'native' : 'clipboard' });
+      window.setTimeout(() => setShareStatus('idle'), 2200);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setNotice(`Share this link: ${url.toString()}`);
+    }
+  }
+
   async function buildAtlas(event: FormEvent) {
     event.preventDefault();
     const subject = prompt.trim();
@@ -595,7 +688,13 @@ export default function FoundryHome() {
         <section className="foundry-stage">
           <div className="foundry-stage-head">
             <span>{activeVendor ? `${activeVendor.toUpperCase()} SUPPLY MAP · CLICK A PART` : stageInstruction}</span>
-            <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
+            <div className="foundry-stage-actions">
+              <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
+              <button type="button" onClick={() => void shareExplosion()} disabled={generating || !atlas.parts.length} aria-label={`Share ${atlas.subject} explosion`}>
+                {shareStatus === 'idle' ? <Share2 /> : <Check />}
+                <span>{shareStatus === 'shared' ? 'SHARED' : shareStatus === 'copied' ? 'LINK COPIED' : 'SHARE'}</span>
+              </button>
+            </div>
           </div>
           <div className="foundry-stage-grid" aria-hidden="true" />
           {(generating || enriching) && (
