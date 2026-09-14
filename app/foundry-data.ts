@@ -1,3 +1,5 @@
+export const CURRENT_INTELLIGENCE_VERSION = 2;
+
 export type AtlasSource = {
   id: string;
   title: string;
@@ -48,6 +50,7 @@ export type AtlasHotspot = {
 };
 
 export type FoundryAtlas = {
+  intelligenceVersion?: number;
   cacheKey?: string;
   subject: string;
   subtitle: string;
@@ -67,6 +70,7 @@ export type FoundryAtlas = {
 };
 
 export type AtlasGalleryItem = {
+  intelligenceVersion?: number;
   cacheKey: string;
   subject: string;
   subtitle: string;

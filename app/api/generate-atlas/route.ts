@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { Agent, fetch as undiciFetch } from 'undici';
 
 import { cacheKeyForPrompt, loadCachedAtlas, saveAtlasToGallery } from '@/app/atlas-store';
-import type { AtlasHotspot, AtlasPart, AtlasSource, FoundryAtlas } from '@/app/foundry-data';
+import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
 
 export const runtime = 'nodejs';
 // Deep generic architectures can spend several minutes in source-backed research
@@ -583,10 +583,11 @@ export async function POST(request: Request) {
   const run = async (report: ProgressReporter): Promise<Response> => {
   report({ stage: 'cache', message: 'Checking the shared gallery for a finished atlas…' });
   const cachedAtlas = await loadCachedAtlas(cacheKeyForPrompt(prompt));
-  if (cachedAtlas) {
+  if (cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
     report({ stage: 'done', message: `Found ${cachedAtlas.subject} in the shared gallery.` });
     return NextResponse.json({ atlas: cachedAtlas, cached: true });
   }
+  if (cachedAtlas) report({ stage: 'cache', message: 'The saved atlas predates component-by-component supplier intelligence; rebuilding it once with the current research model…' });
 
   const connection = getAiConnection(request);
   if (!connection) {

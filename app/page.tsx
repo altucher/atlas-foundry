@@ -18,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
-import { TESLA_DEMO, type AtlasGalleryItem, type AtlasPart, type FoundryAtlas } from './foundry-data';
+import { CURRENT_INTELLIGENCE_VERSION, TESLA_DEMO, type AtlasGalleryItem, type AtlasPart, type FoundryAtlas } from './foundry-data';
 
 const examples = ['data center', 'Falcon 9', 'Tesla', 'espresso machine', 'a male human body'];
 
@@ -162,52 +162,12 @@ export default function FoundryHome() {
     setNotice(message);
   }
 
-  async function openGalleryAtlas(item: AtlasGalleryItem) {
-    setBuildSubject(item.subject);
-    setBuildJournal([{ stage: 'cache', message: 'Opening the finished atlas from the shared gallery…' }]);
-    setGenerating(true);
-    setNotice(`Opening ${item.subject} from the shared gallery…`);
+  async function generateAtlas(subject: string) {
     requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-    try {
-      const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store' });
-      const payload = await response.json() as { atlas?: FoundryAtlas; error?: string };
-      if (!response.ok || !payload.atlas) throw new Error(payload.error ?? 'That gallery atlas is temporarily unavailable.');
-      loadAtlas(payload.atlas, 'Loaded instantly from the shared gallery. No research or rendering was needed.');
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'That gallery atlas is temporarily unavailable.');
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  function chooseVendor(vendor: VendorEntry) {
-    const nextVendor = activeVendor === vendor.company ? null : vendor.company;
-    setActiveVendor(nextVendor);
-    setActiveSystem('All systems');
-    setPartQuery('');
-    if (nextVendor) {
-      setSelectedId(vendor.partIds[0] ?? '');
-      setExplode(1);
-    }
-  }
-
-  async function buildAtlas(event: FormEvent) {
-    event.preventDefault();
-    const subject = prompt.trim();
-    if (!subject || generating) return;
-    requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-    if (/\b(human|anatomy|bodyparts3d)\b/i.test(subject)) {
-      window.location.assign('/human');
-      return;
-    }
-    if (/\btesla\b/i.test(subject)) {
-      loadAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.');
-      return;
-    }
     setBuildSubject(subject);
     setBuildJournal([{ stage: 'request', message: `Preparing a source-backed build plan for ${subject}…` }]);
     setGenerating(true);
-    setNotice('Building the deepest source-backed inventory available, then rendering a matched photorealistic assembled and exploded pair…');
+    setNotice('Building the deepest source-backed inventory and supplier/IP map available, then rendering a matched assembled and exploded pair…');
     try {
       const response = await fetch('/api/generate-atlas', {
         method: 'POST',
@@ -256,7 +216,7 @@ export default function FoundryHome() {
           ? `Research complete. ${payload.imageWarning}`
           : payload.cacheWarning
             ? `Research and rendering complete. ${payload.cacheWarning}`
-            : 'Research, rendering, and gallery save complete. Select any numbered component to inspect it.';
+            : 'Component, supplier/IP, rendering, and gallery research complete. Select any numbered component to inspect it.';
       loadAtlas(payload.atlas, completion);
       if (!payload.cached) void refreshGallery();
     } catch (error) {
@@ -264,6 +224,55 @@ export default function FoundryHome() {
     } finally {
       setGenerating(false);
     }
+  }
+
+  async function openGalleryAtlas(item: AtlasGalleryItem) {
+    if (item.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION) {
+      setPrompt(item.subject);
+      await generateAtlas(item.subject);
+      return;
+    }
+    setBuildSubject(item.subject);
+    setBuildJournal([{ stage: 'cache', message: 'Opening the finished atlas from the shared gallery…' }]);
+    setGenerating(true);
+    setNotice(`Opening ${item.subject} from the shared gallery…`);
+    requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    try {
+      const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store' });
+      const payload = await response.json() as { atlas?: FoundryAtlas; error?: string };
+      if (!response.ok || !payload.atlas) throw new Error(payload.error ?? 'That gallery atlas is temporarily unavailable.');
+      loadAtlas(payload.atlas, 'Loaded instantly from the shared gallery. No research or rendering was needed.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'That gallery atlas is temporarily unavailable.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function chooseVendor(vendor: VendorEntry) {
+    const nextVendor = activeVendor === vendor.company ? null : vendor.company;
+    setActiveVendor(nextVendor);
+    setActiveSystem('All systems');
+    setPartQuery('');
+    if (nextVendor) {
+      setSelectedId(vendor.partIds[0] ?? '');
+      setExplode(1);
+    }
+  }
+
+  async function buildAtlas(event: FormEvent) {
+    event.preventDefault();
+    const subject = prompt.trim();
+    if (!subject || generating) return;
+    if (/\b(human|anatomy|bodyparts3d)\b/i.test(subject)) {
+      window.location.assign('/human');
+      return;
+    }
+    if (/\btesla\b/i.test(subject)) {
+      loadAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.');
+      return;
+    }
+    await generateAtlas(subject);
   }
 
   const stageState = explode < 0.08 ? 'ASSEMBLED OBJECT' : explode > 0.88 ? (hasIllustratedExplosion ? 'EXPLODED SYSTEMS' : 'COMPONENT INVENTORY') : 'SEPARATING SYSTEMS';
@@ -324,7 +333,7 @@ export default function FoundryHome() {
               <span className={`gallery-image${item.imageOrientation === 'portrait' ? ' portrait' : ''}`}>
                 {item.explodedImage ?? item.image ? <img src={item.explodedImage ?? item.image} alt={`Exploded ${item.subject} atlas`} /> : <Box />}
               </span>
-              <span className="gallery-card-copy"><small>SAVED / {item.category}</small><strong>{item.subject}</strong><em>{item.partCount} parts · {item.supplierCount} vendors</em></span>
+              <span className="gallery-card-copy"><small>{item.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION ? `SAVED / ${item.category}` : 'SAVED / RESEARCH REFRESH'}</small><strong>{item.subject}</strong><em>{item.partCount} parts · {item.supplierCount} vendors</em></span>
               <ChevronRight />
             </button>
           ))}

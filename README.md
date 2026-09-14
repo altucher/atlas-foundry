@@ -85,6 +85,7 @@ The generation route requests an extended Fluid-compute window. Deep web researc
 The UI packs only the currently visible records, interpolating them from the assembled center into a responsive desktop or two-column mobile inventory. Search and system filters recompute the layout, so filtered parts do not leave gaps or overlap.
 
 The gallery is shared by all visitors to the canonical deployment. It is a cache of generated educational artifacts, not an assertion that all changing supplier relationships remain current forever; source and applicability notes remain visible on every saved record.
+Saved atlases carry an intelligence-schema version. Opening an older gallery item triggers one transparent research refresh so newly added supplier/IP fields are populated; the refreshed atlas then overwrites the same stable subject key and resumes instant loading.
 
 ## BodyParts3D data pipeline
 

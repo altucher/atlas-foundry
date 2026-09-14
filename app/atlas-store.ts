@@ -1,6 +1,6 @@
 import { head, list, put } from '@vercel/blob';
 
-import type { AtlasGalleryItem, FoundryAtlas } from './foundry-data';
+import { CURRENT_INTELLIGENCE_VERSION, type AtlasGalleryItem, type FoundryAtlas } from './foundry-data';
 
 const galleryPrefix = 'atlas-foundry/v1';
 const numberWords: Record<string, string> = {
@@ -82,7 +82,7 @@ export async function saveAtlasToGallery(atlas: FoundryAtlas, prompt: string) {
     persistImage(cacheKey, 'assembled', atlas.image),
     persistImage(cacheKey, 'exploded', atlas.explodedImage),
   ]);
-  const persisted: FoundryAtlas = { ...atlas, cacheKey, image, explodedImage };
+  const persisted: FoundryAtlas = { ...atlas, intelligenceVersion: CURRENT_INTELLIGENCE_VERSION, cacheKey, image, explodedImage };
   await put(atlasPath(cacheKey), JSON.stringify(persisted), {
     access: 'public',
     addRandomSuffix: false,
@@ -96,6 +96,7 @@ export async function saveAtlasToGallery(atlas: FoundryAtlas, prompt: string) {
 function galleryItem(atlas: FoundryAtlas, fallbackKey: string): AtlasGalleryItem {
   const suppliers = new Set(atlas.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.company.toLowerCase())));
   return {
+    intelligenceVersion: atlas.intelligenceVersion,
     cacheKey: atlas.cacheKey ?? fallbackKey,
     subject: atlas.subject,
     subtitle: atlas.subtitle,
