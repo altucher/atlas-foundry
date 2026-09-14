@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import type { AtlasPart, AtlasSource, FoundryAtlas } from '@/app/foundry-data';
+import type { AtlasHotspot, AtlasPart, AtlasSource, FoundryAtlas } from '@/app/foundry-data';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -145,8 +145,13 @@ function fallbackHotspots(parts: AtlasPart[]) {
     const itemsInRow = Math.min(columns, parts.length - row * columns);
     const x = itemsInRow === 1 ? 50 : 12 + (column * 76) / (itemsInRow - 1);
     const y = rows === 1 ? 50 : 16 + (row * 68) / (rows - 1);
-    return [part.id, { x, y }];
-  }));
+    return [part.id, {
+      x,
+      y,
+      width: Math.min(20, 68 / columns),
+      height: Math.min(18, 58 / rows),
+    }];
+  })) as Record<string, AtlasHotspot>;
 }
 
 async function generateImage(
@@ -192,11 +197,13 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
         items: {
           type: 'object',
           additionalProperties: false,
-          required: ['id', 'x', 'y'],
+          required: ['id', 'x', 'y', 'width', 'height'],
           properties: {
             id: { type: 'string' },
             x: { type: 'number', minimum: 0, maximum: 100 },
             y: { type: 'number', minimum: 0, maximum: 100 },
+            width: { type: 'number', minimum: 1, maximum: 100 },
+            height: { type: 'number', minimum: 1, maximum: 100 },
           },
         },
       },
@@ -208,7 +215,7 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: connection.researchModel,
-      instructions: 'Locate components in an exploded-view product image. Return the visual center of each requested component cluster as x/y percentages measured from the top-left corner. Use every exact id once. If several related pieces form one system, use the center of that cluster.',
+      instructions: 'Locate components in an exploded-view product image. Return a tight clickable bounding rectangle for each requested component cluster. Express its center as x/y percentages and its size as width/height percentages of the full image, measured from the top-left corner. Use every exact id once. If several adjacent pieces form one system, enclose that cluster. Do not include unrelated neighboring parts.',
       input: [{
         role: 'user',
         content: [
@@ -221,13 +228,17 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
   });
   if (!response.ok) throw new Error(`Hotspot mapping failed (${response.status}).`);
   const payload = (await response.json()) as Record<string, unknown>;
-  const located = JSON.parse(extractOutputText(payload)) as { hotspots?: Array<{ id: string; x: number; y: number }> };
+  const located = JSON.parse(extractOutputText(payload)) as { hotspots?: Array<AtlasHotspot & { id: string }> };
   const knownIds = new Set(parts.map((part) => part.id));
   for (const hotspot of located.hotspots ?? []) {
-    if (!knownIds.has(hotspot.id) || !Number.isFinite(hotspot.x) || !Number.isFinite(hotspot.y)) continue;
+    if (!knownIds.has(hotspot.id) || !Number.isFinite(hotspot.x) || !Number.isFinite(hotspot.y) || !Number.isFinite(hotspot.width) || !Number.isFinite(hotspot.height)) continue;
+    const width = Math.max(6, Math.min(38, hotspot.width ?? 10));
+    const height = Math.max(6, Math.min(32, hotspot.height ?? 10));
     fallback[hotspot.id] = {
-      x: Math.max(7, Math.min(93, hotspot.x)),
-      y: Math.max(9, Math.min(88, hotspot.y)),
+      x: Math.max(width / 2 + 1, Math.min(99 - width / 2, hotspot.x)),
+      y: Math.max(height / 2 + 1, Math.min(96 - height / 2, hotspot.y)),
+      width,
+      height,
     };
   }
   return fallback;

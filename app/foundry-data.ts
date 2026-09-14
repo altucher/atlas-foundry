@@ -16,6 +16,13 @@ export type AtlasPart = {
   confidence: 'high' | 'medium' | 'contextual';
 };
 
+export type AtlasHotspot = {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+};
+
 export type FoundryAtlas = {
   subject: string;
   subtitle: string;
@@ -28,7 +35,7 @@ export type FoundryAtlas = {
   imageAlt?: string;
   explodedImage?: string;
   explodedImageAlt?: string;
-  hotspots?: Record<string, { x: number; y: number }>;
+  hotspots?: Record<string, AtlasHotspot | AtlasHotspot[]>;
   mode: 'curated' | 'generated' | 'authoritative-3d';
   generatedAt?: string;
 };
@@ -51,18 +58,23 @@ export const TESLA_DEMO: FoundryAtlas = {
   explodedImage: '/tesla-exploded-v2.jpg',
   explodedImageAlt: 'Conceptual exploded systems illustration of a Tesla Model 3-class electric vehicle',
   hotspots: {
-    'body-structure': { x: 44, y: 23 },
-    'battery-pack': { x: 52, y: 78 },
-    'rear-drive': { x: 30, y: 49 },
-    'front-drive': { x: 70, y: 61 },
-    'power-electronics': { x: 15, y: 48 },
-    thermal: { x: 82, y: 48 },
-    suspension: { x: 27, y: 63 },
-    braking: { x: 14, y: 70 },
-    steering: { x: 46, y: 50 },
-    computers: { x: 59, y: 48 },
-    charging: { x: 12, y: 31 },
-    restraints: { x: 83, y: 27 },
+    'body-structure': { x: 45, y: 23, width: 46, height: 30 },
+    'battery-pack': { x: 52, y: 78, width: 42, height: 18 },
+    'rear-drive': { x: 30, y: 49, width: 17, height: 16 },
+    'front-drive': { x: 70, y: 61, width: 22, height: 17 },
+    'power-electronics': { x: 15, y: 48, width: 20, height: 18 },
+    thermal: { x: 82, y: 48, width: 22, height: 19 },
+    suspension: { x: 27, y: 63, width: 24, height: 18 },
+    braking: [
+      { x: 12, y: 69, width: 12, height: 22 },
+      { x: 20, y: 79, width: 14, height: 20 },
+      { x: 82, y: 79, width: 14, height: 20 },
+      { x: 89, y: 68, width: 12, height: 22 },
+    ],
+    steering: { x: 46, y: 50, width: 24, height: 17 },
+    computers: { x: 59, y: 48, width: 18, height: 15 },
+    charging: { x: 12, y: 31, width: 14, height: 16 },
+    restraints: { x: 83, y: 27, width: 25, height: 23 },
   },
   sources: [
     { id: 'tesla-owner', title: 'Model 3 Owner\'s Manual', publisher: 'Tesla', url: teslaManual },

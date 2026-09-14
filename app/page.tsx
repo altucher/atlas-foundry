@@ -125,6 +125,7 @@ export default function FoundryHome() {
   }
 
   const stageState = explode < 0.08 ? 'ASSEMBLED OBJECT' : explode > 0.88 ? (hasIllustratedExplosion ? 'EXPLODED SYSTEMS' : 'COMPONENT INVENTORY') : 'SEPARATING SYSTEMS';
+  const stageInstruction = hasIllustratedExplosion && explode >= 0.22 ? `${stageState} · CLICK A PART` : stageState;
 
   return (
     <main className="foundry-shell">
@@ -190,7 +191,7 @@ export default function FoundryHome() {
 
         <section className="foundry-stage">
           <div className="foundry-stage-head">
-            <span>{stageState}</span>
+            <span>{stageInstruction}</span>
             <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
           </div>
           <div className="foundry-stage-grid" aria-hidden="true" />
@@ -215,17 +216,24 @@ export default function FoundryHome() {
               <img src={atlas.explodedImage} alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`} />
               <span className="foundry-art-badge">AI-ILLUSTRATED · DOCUMENTED SYSTEMS · NOT SERVICE GEOMETRY</span>
               <div className="foundry-hotspots" aria-label="Clickable component regions">
-                {visibleParts.map((part) => {
-                  const position = atlas.hotspots?.[part.id];
-                  if (!position) return null;
+                {visibleParts.flatMap((part) => {
+                  const hotspot = atlas.hotspots?.[part.id];
+                  if (!hotspot) return [];
+                  const regions = Array.isArray(hotspot) ? hotspot : [hotspot];
                   const partIndex = atlas.parts.findIndex((candidate) => candidate.id === part.id);
                   const active = part.id === selectedPart?.id;
-                  return (
+                  return regions.map((region, regionIndex) => (
                     <button
                       type="button"
-                      key={part.id}
+                      key={`${part.id}-${regionIndex}`}
                       className={`foundry-hotspot${active ? ' active' : ''}`}
-                      style={{ left: `${position.x}%`, top: `${position.y}%`, '--part-color': part.color } as CSSProperties}
+                      style={{
+                        left: `${region.x}%`,
+                        top: `${region.y}%`,
+                        width: `${region.width ?? 9}%`,
+                        height: `${region.height ?? 9}%`,
+                        '--part-color': part.color,
+                      } as CSSProperties}
                       disabled={explode < 0.22}
                       onClick={() => setSelectedId(part.id)}
                       aria-label={`Select ${part.name}`}
@@ -234,7 +242,7 @@ export default function FoundryHome() {
                       <i>{String(partIndex + 1).padStart(2, '0')}</i>
                       <span>{part.name}</span>
                     </button>
-                  );
+                  ));
                 })}
               </div>
             </div>
