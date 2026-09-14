@@ -19,6 +19,7 @@ export function cacheKeyForPrompt(prompt: string) {
     .slice(0, 96);
   if (normalized === 'data-center' || normalized === 'data-centers') return 'data-center';
   if (normalized === 'falcon-9' || normalized === 'spacex-falcon-9') return 'falcon-9';
+  if (normalized === '8-mattress' || normalized === '8-sleep-mattress') return 'eight-sleep-mattress';
   return normalized || 'atlas';
 }
 

@@ -79,6 +79,9 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /Rejected a mismatched saved record/);
   assert.match(generationRoute, /Research identity mismatch/);
   assert.match(generationRoute, /retrying automatically/);
+  assert.match(generationRoute, /generateDraftResearchWithRecovery/);
+  assert.match(generationRoute, /Compact recovery research is still running/);
+  assert.match(generationRoute, /canonicalResearchPrompt/);
   assert.match(generationRoute, /forensic component-supply-chain researcher/);
   assert.match(generationRoute, /Supplier evidence pass/);
   assert.match(generationRoute, /Coverage is an audit ledger/);
@@ -92,6 +95,7 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(store, /normalized === 'data-center' \|\| normalized === 'data-centers'/);
   assert.match(store, /normalized === 'falcon-9' \|\| normalized === 'spacex-falcon-9'/);
   assert.match(store, /falcon-9-block-5-launch-vehicle/);
+  assert.match(store, /eight-sleep-mattress/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /pendingAtlas\(subject\)/);
   assert.match(page, /Gallery identity mismatch/);

@@ -408,7 +408,17 @@ function subjectMatchesRequest(requested: string, returned: string) {
   const terms = (value: string) => new Set(value
     .normalize('NFKD')
     .toLowerCase()
+    .replace(/\bzero\b/g, '0')
+    .replace(/\bone\b/g, '1')
+    .replace(/\btwo\b/g, '2')
+    .replace(/\bthree\b/g, '3')
+    .replace(/\bfour\b/g, '4')
+    .replace(/\bfive\b/g, '5')
+    .replace(/\bsix\b/g, '6')
+    .replace(/\bseven\b/g, '7')
+    .replace(/\beight\b/g, '8')
     .replace(/\bnine\b/g, '9')
+    .replace(/\bten\b/g, '10')
     .replace(/[^a-z0-9]+/g, ' ')
     .split(/\s+/)
     .filter((term) => (term.length > 1 || /^\d$/.test(term)) && !stopWords.has(term)));
@@ -420,6 +430,16 @@ function subjectMatchesRequest(requested: string, returned: string) {
   // must never be enough to turn a Boeing request into a different product.
   const requiredMatches = requestedTerms.size === 1 ? 1 : Math.ceil(requestedTerms.size * 0.6);
   return sharedTerms.length >= requiredMatches;
+}
+
+function canonicalResearchPrompt(prompt: string) {
+  // “Eight mattress” is a common shorthand for the Eight Sleep smart mattress
+  // system. Preserve the user's text in the UI while making the research target
+  // explicit enough to avoid treating the number as a mattress size or quantity.
+  if (/^\s*(?:(?:a|an|the)\s+)?(?:eight|8)(?:\s+sleep)?\s+mattress(?:es)?\s*$/i.test(prompt)) {
+    return 'Eight Sleep smart mattress system';
+  }
+  return prompt;
 }
 
 type ArchiveLayerDefinition = { readonly id: string; readonly label: string; readonly focus: string };
@@ -623,6 +643,37 @@ async function generateResearchWithFallback(
       reasoning: { effort: 'low' },
       tools,
     }, report, progress);
+  }
+}
+
+async function generateDraftResearchWithRecovery(
+  connection: AiConnection,
+  body: Record<string, unknown>,
+  report: ProgressReporter,
+) {
+  try {
+    return await generateResearchWithFallback(connection, body, report);
+  } catch (secondError) {
+    const finalModel = connection.supplierResearchModel;
+    const tools = Array.isArray(body.tools)
+      ? body.tools.map((tool) => tool && typeof tool === 'object' && 'type' in tool && tool.type === 'web_search'
+        ? { ...tool, search_context_size: 'low' }
+        : tool)
+      : body.tools;
+    console.warn(`Both fast draft attempts failed; using compact recovery with ${finalModel}`, secondError);
+    report({
+      stage: 'research',
+      message: 'The fast research pass ended early. Building a smaller source-backed component draft with the reliability model…',
+    });
+    return generateResearchInBackground(connection, {
+      ...body,
+      model: finalModel,
+      reasoning: { effort: 'low' },
+      input: `${String(body.input ?? '')}\n\nReliability recovery: return 12–20 high-value components and 2–8 strong sources. Keep every field concise. Complete the valid schema before adding optional depth; detailed supplier research will run separately.`,
+      tools,
+      max_tool_calls: 8,
+      max_output_tokens: 20_000,
+    }, report, { stage: 'research', message: 'Compact recovery research is still running' });
   }
 }
 
@@ -1071,6 +1122,7 @@ export async function POST(request: Request) {
   if (prompt.length < 2 || prompt.length > 160) {
     return NextResponse.json({ error: 'Prompt must be between 2 and 160 characters.' }, { status: 400 });
   }
+  const researchPrompt = canonicalResearchPrompt(prompt);
 
   const cacheOrigin = process.env.ATLAS_CACHE_ORIGIN?.trim();
   if (cacheOrigin) {
@@ -1105,7 +1157,7 @@ export async function POST(request: Request) {
   report({ stage: 'cache', message: 'Checking the shared gallery for a finished atlas…' });
   const promptCacheKey = cacheKeyForPrompt(prompt);
   const loadedCachedAtlas = await loadCachedAtlas(promptCacheKey);
-  const cachedAtlas = loadedCachedAtlas && subjectMatchesRequest(prompt, loadedCachedAtlas.subject)
+  const cachedAtlas = loadedCachedAtlas && subjectMatchesRequest(researchPrompt, loadedCachedAtlas.subject)
     ? loadedCachedAtlas
     : null;
   if (loadedCachedAtlas && !cachedAtlas) {
@@ -1137,7 +1189,7 @@ export async function POST(request: Request) {
 
   if (phase === 'enrich') {
     const draft = await loadAtlasDraft(promptCacheKey);
-    if (!draft || !subjectMatchesRequest(prompt, draft.subject)) {
+    if (!draft || !subjectMatchesRequest(researchPrompt, draft.subject)) {
       return NextResponse.json({ error: 'The first draft is no longer available for supplier enrichment.' }, { status: 409 });
     }
     try {
@@ -1233,18 +1285,18 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
 
   try {
     report({ stage: 'research', message: `Fast first pass · mapping ${prompt} with ${defaultDraftModel}…` });
-    const responsePayload = await generateResearchWithFallback(connection, {
+    const responsePayload = await generateDraftResearchWithRecovery(connection, {
         model: connection.draftModel,
         reasoning: { effort: 'low' },
         instructions,
-        input: `Build a component atlas for: ${prompt}`,
+        input: `Build a component atlas for: ${researchPrompt}`,
         tools: [{ type: 'web_search', search_context_size: 'low' }],
         text: { format: { type: 'json_schema', name: 'component_atlas', strict: true, schema: atlasSchema } },
     }, report);
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
     const normalized = normalizeAtlas(rawAtlas);
-    if (!subjectMatchesRequest(prompt, normalized.subject)) {
-      throw new Error(`Research identity mismatch: requested ${prompt}, but the provider returned ${normalized.subject}. The mismatched record was rejected and was not saved.`);
+    if (!subjectMatchesRequest(researchPrompt, normalized.subject)) {
+      throw new Error(`Research identity mismatch: requested ${researchPrompt}, but the provider returned ${normalized.subject}. The mismatched record was rejected and was not saved.`);
     }
     report({ stage: 'inventory', message: `Mapped ${normalized.parts.length} documented components across ${new Set(normalized.parts.map((part) => part.system)).size} systems.` });
     for (const source of normalized.sources) {
@@ -1311,7 +1363,11 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     });
   } catch (error) {
     console.error('Atlas generation failed', error);
-    return NextResponse.json({ error: 'The research provider ended both generation attempts before completion. Your subject is valid; please retry in a few minutes.' }, { status: 500 });
+    const message = error instanceof Error ? error.message : '';
+    const errorMessage = message.startsWith('Research identity mismatch:')
+      ? `${message} Please make the product or model name more specific.`
+      : 'Three independent research attempts ended before a safe first draft could be completed. Nothing mismatched was saved; please retry in a few minutes.';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
   };
 
