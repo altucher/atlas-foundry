@@ -248,6 +248,7 @@ export default function FoundryHome() {
         const decoder = new TextDecoder();
         let buffer = '';
         const processLine = (line: string) => {
+          if (requestId !== activeRequestRef.current) return;
           if (!line.trim()) return;
           const event = JSON.parse(line) as { type?: string; stage?: string; message?: string; status?: number; payload?: AtlasPayload };
           if (event.type === 'progress' && event.message) {
