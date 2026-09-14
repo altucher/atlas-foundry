@@ -5,13 +5,17 @@ export type AtlasSource = {
   url: string;
 };
 
-export type AtlasVendor = {
+export type SupplierStatus = 'confirmed' | 'reported' | 'rumored';
+
+export type AtlasSupplier = {
   company: string;
   ticker: string;
   exchange: string;
   yahooSymbol: string;
   evidenceUrl: string;
   financeUrl: string;
+  relationshipStatus: SupplierStatus;
+  note: string;
 };
 
 export type AtlasPart = {
@@ -23,7 +27,7 @@ export type AtlasPart = {
   color: string;
   sourceUrls: string[];
   confidence: 'high' | 'medium' | 'contextual';
-  vendor?: AtlasVendor;
+  suppliers?: AtlasSupplier[];
 };
 
 export type AtlasHotspot = {
@@ -45,6 +49,7 @@ export type FoundryAtlas = {
   imageAlt?: string;
   explodedImage?: string;
   explodedImageAlt?: string;
+  imageOrientation: 'landscape' | 'portrait';
   hotspots?: Record<string, AtlasHotspot | AtlasHotspot[]>;
   mode: 'curated' | 'generated' | 'authoritative-3d';
   generatedAt?: string;
@@ -63,6 +68,7 @@ export const TESLA_DEMO: FoundryAtlas = {
   accuracyNote:
     'Illustrative major-system map, not a teardown, repair guide, or engineering drawing. Always use the exact vehicle manual and qualified service information.',
   mode: 'curated',
+  imageOrientation: 'landscape',
   image: '/tesla-assembled-v2.jpg',
   imageAlt: 'Conceptual assembled Tesla Model 3-class electric vehicle in a dark museum studio',
   explodedImage: '/tesla-exploded-v2.jpg',

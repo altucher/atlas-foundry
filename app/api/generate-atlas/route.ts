@@ -58,7 +58,7 @@ function getAiConnection(request: Request): AiConnection | null {
 const atlasSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['subject', 'subtitle', 'category', 'summary', 'accuracyNote', 'parts', 'sources', 'visualPrompt'],
+  required: ['subject', 'subtitle', 'category', 'summary', 'accuracyNote', 'parts', 'sources', 'visualPrompt', 'imageOrientation'],
   properties: {
     subject: { type: 'string' },
     subtitle: { type: 'string' },
@@ -66,8 +66,9 @@ const atlasSchema = {
     summary: { type: 'string' },
     accuracyNote: { type: 'string' },
     visualPrompt: { type: 'string' },
+    imageOrientation: { type: 'string', enum: ['landscape', 'portrait'] },
     sources: {
-      type: 'array', minItems: 2, maxItems: 12,
+      type: 'array', minItems: 2, maxItems: 24,
       items: {
         type: 'object', additionalProperties: false,
         required: ['id', 'title', 'publisher', 'url'],
@@ -77,31 +78,33 @@ const atlasSchema = {
       },
     },
     parts: {
-      type: 'array', minItems: 6, maxItems: 14,
+      type: 'array', minItems: 8, maxItems: 30,
       items: {
         type: 'object', additionalProperties: false,
-        required: ['id', 'name', 'system', 'description', 'sourceId', 'color', 'sourceUrls', 'confidence', 'vendor'],
+        required: ['id', 'name', 'system', 'description', 'sourceId', 'color', 'sourceUrls', 'confidence', 'suppliers'],
         properties: {
           id: { type: 'string' }, name: { type: 'string' }, system: { type: 'string' },
           description: { type: 'string' }, sourceId: { type: 'string' }, color: { type: 'string' },
-          sourceUrls: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+          sourceUrls: { type: 'array', items: { type: 'string' }, maxItems: 6 },
           confidence: { type: 'string', enum: ['high', 'medium', 'contextual'] },
-          vendor: {
-            anyOf: [
-              {
-                type: 'object',
-                additionalProperties: false,
-                required: ['company', 'ticker', 'exchange', 'yahooSymbol', 'evidenceUrl'],
-                properties: {
-                  company: { type: 'string' },
-                  ticker: { type: 'string' },
-                  exchange: { type: 'string' },
-                  yahooSymbol: { type: 'string' },
-                  evidenceUrl: { type: 'string' },
-                },
+          suppliers: {
+            type: 'array',
+            minItems: 0,
+            maxItems: 6,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['company', 'ticker', 'exchange', 'yahooSymbol', 'evidenceUrl', 'relationshipStatus', 'note'],
+              properties: {
+                company: { type: 'string' },
+                ticker: { type: 'string' },
+                exchange: { type: 'string' },
+                yahooSymbol: { type: 'string' },
+                evidenceUrl: { type: 'string' },
+                relationshipStatus: { type: 'string', enum: ['confirmed', 'reported', 'rumored'] },
+                note: { type: 'string' },
               },
-              { type: 'null' },
-            ],
+            },
           },
         },
       },
@@ -140,27 +143,38 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
     }))
     .filter((source) => source.url);
   const knownUrls = new Set(sources.map((source) => source.url));
-  const parts: AtlasPart[] = raw.parts.slice(0, 14).map((part, index) => {
-    const evidenceUrl = part.vendor ? safeUrl(part.vendor.evidenceUrl) : '';
-    const yahooSymbol = part.vendor?.yahooSymbol?.trim().slice(0, 24) ?? '';
-    const vendor = part.vendor
-      && evidenceUrl
-      && knownUrls.has(evidenceUrl)
-      && /^[A-Za-z0-9.^=-]{1,24}$/.test(yahooSymbol)
-      && part.vendor.company.trim()
-      && part.vendor.ticker.trim()
-      && part.vendor.exchange.trim()
-      ? {
-          company: part.vendor.company.trim().slice(0, 100),
-          ticker: part.vendor.ticker.trim().slice(0, 24),
-          exchange: part.vendor.exchange.trim().slice(0, 40),
-          yahooSymbol,
-          evidenceUrl,
-          financeUrl: `https://finance.yahoo.com/quote/${encodeURIComponent(yahooSymbol)}/`,
-        }
-      : undefined;
+  const parts: AtlasPart[] = raw.parts.slice(0, 30).map((part, index) => {
+    const supplierMap = new Map<string, NonNullable<AtlasPart['suppliers']>[number]>();
+    for (const supplier of part.suppliers ?? []) {
+      const evidenceUrl = safeUrl(supplier.evidenceUrl);
+      const yahooSymbol = supplier.yahooSymbol?.trim().slice(0, 24) ?? '';
+      if (!evidenceUrl
+        || !knownUrls.has(evidenceUrl)
+        || !/^[A-Za-z0-9.^=-]{1,24}$/.test(yahooSymbol)
+        || !supplier.company.trim()
+        || !supplier.ticker.trim()
+        || !supplier.exchange.trim()
+        || !['confirmed', 'reported', 'rumored'].includes(supplier.relationshipStatus)) continue;
+      const normalizedSupplier = {
+        company: supplier.company.trim().slice(0, 100),
+        ticker: supplier.ticker.trim().slice(0, 24),
+        exchange: supplier.exchange.trim().slice(0, 40),
+        yahooSymbol,
+        evidenceUrl,
+        financeUrl: `https://finance.yahoo.com/quote/${encodeURIComponent(yahooSymbol)}/`,
+        relationshipStatus: supplier.relationshipStatus,
+        note: supplier.note.trim().slice(0, 220),
+      };
+      const key = yahooSymbol.toUpperCase();
+      const current = supplierMap.get(key);
+      const rank = { confirmed: 3, reported: 2, rumored: 1 } as const;
+      if (!current || rank[normalizedSupplier.relationshipStatus] > rank[current.relationshipStatus]) supplierMap.set(key, normalizedSupplier);
+    }
+    const suppliers = [...supplierMap.values()].slice(0, 6);
     const sourceUrls = part.sourceUrls.map(safeUrl).filter((url) => knownUrls.has(url));
-    if (vendor && !sourceUrls.includes(vendor.evidenceUrl)) sourceUrls.push(vendor.evidenceUrl);
+    for (const supplier of suppliers) {
+      if (!sourceUrls.includes(supplier.evidenceUrl)) sourceUrls.push(supplier.evidenceUrl);
+    }
     return {
       ...part,
       id: part.id.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80) || `part-${index + 1}`,
@@ -169,11 +183,16 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
       description: part.description.slice(0, 420),
       sourceId: part.sourceId.slice(0, 100),
       color: /^#[0-9a-fA-F]{6}$/.test(part.color) ? part.color : '#b9aa89',
-      sourceUrls: sourceUrls.slice(0, 4),
-      vendor,
+      sourceUrls: sourceUrls.slice(0, 6),
+      suppliers: suppliers.length ? suppliers : undefined,
     };
   });
-  return { ...raw, sources, parts };
+  return {
+    ...raw,
+    imageOrientation: raw.imageOrientation === 'portrait' ? 'portrait' as const : 'landscape' as const,
+    sources,
+    parts,
+  };
 }
 
 function fallbackHotspots(parts: AtlasPart[]) {
@@ -200,19 +219,23 @@ async function generateImage(
   visualPrompt: string,
   mode: 'assembled' | 'exploded',
   parts: AtlasPart[],
+  imageOrientation: FoundryAtlas['imageOrientation'],
 ) {
   const componentList = parts.map((part, index) => `${index + 1}. ${part.name} (${part.system})`).join('\n');
-  const sharedDirection = `Photorealistic premium 3D product visualization of ${subject}. ${visualPrompt} Wide landscape, three-quarter view, deep charcoal and limestone museum studio, restrained graphite palette, realistic materials, precise soft key light and crisp rim lighting, high contrast with readable shadow detail. No people, no text, no labels, no arrows, no logos, no watermark, no workshop clutter. Educational conceptual visualization, not an engineering drawing or service guide.`;
+  const formatDirection = imageOrientation === 'portrait'
+    ? 'Tall portrait technical plate, with the complete vertical object and every separated assembly comfortably inside the frame.'
+    : 'Wide landscape technical plate, with the complete object and every separated assembly comfortably inside the frame.';
+  const sharedDirection = `Photorealistic premium 3D product visualization of ${subject}. ${visualPrompt} ${formatDirection} Canonical three-quarter view, deep charcoal and limestone museum studio, restrained graphite palette, realistic materials, precise soft key light and crisp rim lighting, high contrast with readable shadow detail. No people, no text, no labels, no arrows, no logos, no watermark, no workshop clutter. Educational conceptual visualization, not an engineering drawing or service guide.`;
   const modeDirection = mode === 'assembled'
     ? 'Show one complete, fully assembled object centered and intact. No cutaway, no exposed internals, and no floating or duplicated parts. Leave generous dark negative space around the silhouette.'
-    : `Create the matching exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. Keep the recognizable main shell or enclosing structure central. Pull every documented major component below into a distinct, generously separated, non-overlapping visual cluster. Show each component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent tiny proprietary internals; represent uncertain items only as a credible major assembly.\n\nDocumented components:\n${componentList}`;
+    : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. Keep the recognizable main shell or enclosing structure central. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
   const response = await fetch(`${connection.baseUrl}/images/generations`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: connection.imageModel,
       prompt: `${sharedDirection} ${modeDirection}`,
-      size: '1536x1024', quality: 'high', output_format: 'webp',
+      size: imageOrientation === 'portrait' ? '1024x1536' : '1536x1024', quality: 'high', output_format: 'webp',
     }),
   });
   if (!response.ok) throw new Error(`Image generation failed (${response.status}).`);
@@ -313,11 +336,19 @@ export async function POST(request: Request) {
   recent.push(now);
   requestWindows.set(clientId, recent);
 
-  const instructions = `You create careful educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals, museums, universities, government sources, standards bodies, SEC or exchange filings, and strong technical references. Identify 6–14 meaningful, physically distinct parts or major systems that a general learner can understand. Never invent proprietary internals, exact geometry, hidden components, identifiers, suppliers, or stock listings. When documentation does not support a claim, mark it contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one of the returned source URLs when possible.
+  const instructions = `You create careful, unusually detailed educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals, museums, universities, government sources, standards bodies, regulatory filings, SEC or exchange filings, and strong technical references.
 
-For an engineered product, set vendor only when reliable public evidence identifies the company that manufactures or supplies that specific component and current exchange or investor-relations evidence confirms that company is publicly traded. Set vendor to null for private companies, the product brand alone, rumors, teardown speculation, model/trim ambiguity, or uncertain supplier relationships. Do not treat the product's brand owner as a component vendor unless it actually manufactures that named component. The vendor evidenceUrl must exactly match one URL in sources that supports the component-supplier relationship, and part.sourceUrls must include it. ticker is the exchange ticker; yahooSymbol is the exact symbol Yahoo Finance uses, including market suffixes such as .T, .DE, or .KS when applicable.
+Build the fullest useful component inventory that public evidence supports, within 8–30 physically distinct records. Use 8–16 parts for simple objects and 18–30 for complex engineered products, vehicles, rockets, aircraft, or machines. For a complex subject, do not stop at exterior sections: include documented second-level assemblies such as structures, tanks, domes, conduits, propulsion units, engine clusters, control hardware, avionics, interfaces, thermal hardware, recovery hardware, and protective enclosures when the sources support them. Repeated assemblies may be one clearly named record with the documented quantity. Avoid filler, synonyms, duplicated records, screws, generic fasteners, and details too small to identify in an exploded plate.
 
-The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, exhaustive dataset, or investment recommendation.`;
+Never invent proprietary internals, exact geometry, hidden components, identifiers, suppliers, or stock listings. When documentation supports the existence of an assembly but not its precise construction, include it only at the supported assembly level and mark confidence contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one returned source URL when possible.
+
+For an engineered product, suppliers is a list because one component may have multiple suppliers across variants, factories, model years, contracts, or reports. Include only publicly traded companies with a current exchange listing and set one evidence status per relationship:
+- confirmed: first-party, regulatory filing, customer, or supplier evidence directly confirms the component relationship;
+- reported: a credible established technical or financial publication reports it, but the companies do not directly confirm it;
+- rumored: a published rumor, analyst claim, or teardown inference alleges it without confirmation.
+Rumors are allowed only when a real returned source publishes the claim. Never turn absence of evidence, visual resemblance, internet repetition, or your own inference into a rumor. The note must briefly state what product version, period, region, or uncertainty the claim applies to. Omit private companies and unsupported candidates. Do not treat the product's brand owner as a component supplier unless it actually manufactures that named component. Each evidenceUrl must exactly match one URL in sources that supports the component-supplier relationship, and part.sourceUrls must include it. ticker is the exchange ticker; yahooSymbol is the exact symbol Yahoo Finance uses, including market suffixes such as .T, .DE, or .KS when applicable.
+
+Set imageOrientation to portrait for strongly vertical subjects such as launch vehicles, towers, standing anatomy, or long upright tools; otherwise use landscape. The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, literally exhaustive parts database, or investment recommendation.`;
 
   try {
     const researchResponse = await fetch(`${connection.baseUrl}/responses`, {
@@ -340,8 +371,8 @@ The visualPrompt should describe the object's documented external appearance, ma
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
     const normalized = normalizeAtlas(rawAtlas);
     const imageResults = await Promise.allSettled([
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts),
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts),
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation),
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation),
     ]);
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
     const explodedImage = imageResults[1].status === 'fulfilled' ? imageResults[1].value : undefined;
@@ -369,6 +400,7 @@ The visualPrompt should describe the object's documented external appearance, ma
       imageAlt: `Photorealistic AI-generated assembled reference view of ${normalized.subject}`,
       explodedImage,
       explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${normalized.subject}`,
+      imageOrientation: normalized.imageOrientation,
       hotspots,
       mode: 'generated',
       generatedAt: new Date().toISOString(),

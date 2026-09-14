@@ -39,7 +39,7 @@ npm run build
 
 ## Product modes
 
-- **Generated atlas:** web research with cited first-party or authoritative sources, 6–14 major component records, a high-quality photorealistic assembled/exploded image pair, independently animated visual component layers, full-component click regions, system filters, component search, continuous explosion control, and source-backed public-company vendor/ticker labels with Yahoo Finance links.
+- **Generated atlas:** web research with cited first-party or authoritative sources, 8–16 records for simple objects or 18–30 records for complex machines, a high-quality photorealistic assembled/exploded image pair, independently animated visual component layers, full-component click regions, system filters, component search, continuous explosion control, and multiple source-backed public-company supplier/ticker labels with Yahoo Finance links.
 - **Curated demo:** a ready-to-show Tesla electric-vehicle systems overview with paired assembled/exploded studio illustrations and twelve clickable component regions. It is explicitly conceptual and varies by model/year/trim; the hotspots are a visual index, not service geometry.
 - **Verified 3D edition:** the `/human` route uses identity-preserving BodyParts3D source meshes, GPU per-part transforms, geometric picking, and true visible-only exploded packing.
 
@@ -66,9 +66,10 @@ public/ATTRIBUTION.md         Anatomy data license and adaptation details
 
 `POST /api/generate-atlas` accepts `{ "prompt": "…" }` and performs two server-side operations:
 
-1. The OpenAI Responses API researches the public web and returns a strict component-atlas schema with supporting HTTPS sources. For engineered products, supplier names and public-company tickers are included only when the component relationship and listing are supported; Yahoo Finance URLs are derived server-side from the verified symbol.
-2. The Images API renders matched high-quality assembled and exploded studio views in parallel.
-3. A vision pass locates each researched part in the exploded image and attaches its source-backed record to a clickable hotspot. If visual generation or localization fails, the researched catalog still returns with a deterministic non-overlapping inventory fallback.
+1. The OpenAI Responses API researches the public web and returns a strict component-atlas schema with up to 30 components and 24 supporting HTTPS sources. Complex products retain documented second-level assemblies instead of being reduced to a short exterior overview.
+2. For engineered products, each component may list multiple publicly traded suppliers. Every relationship is visibly classified as **confirmed**, **reported**, or **rumored**, includes a claim-specific source and applicability note, and receives a server-derived Yahoo Finance URL. A rumor must be a published claim; unsupported model inference is discarded.
+3. The Images API renders matched high-quality assembled and exhaustive exploded studio views in parallel, using portrait plates for strongly vertical subjects such as launch vehicles.
+4. A vision pass locates each researched part in the exploded image and attaches its source-backed record to a clickable hotspot. If visual generation or localization fails, the researched catalog still returns with a deterministic non-overlapping inventory fallback.
 
 The UI packs only the currently visible records, interpolating them from the assembled center into a responsive desktop or two-column mobile inventory. Search and system filters recompute the layout, so filtered parts do not leave gaps or overlap.
 

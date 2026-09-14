@@ -20,7 +20,19 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { TESLA_DEMO, type AtlasPart, type FoundryAtlas } from './foundry-data';
 
-const examples = ['Tesla', 'espresso machine', 'DSLR camera', 'a male human body'];
+const examples = ['Falcon 9', 'Tesla', 'espresso machine', 'DSLR camera', 'a male human body'];
+
+function supplierSummary(part: AtlasPart) {
+  const suppliers = part.suppliers ?? [];
+  if (!suppliers.length) return '';
+  const first = suppliers[0];
+  const prefix = first.relationshipStatus === 'confirmed' ? '' : `${first.relationshipStatus.toUpperCase()} · `;
+  return `${prefix}${first.company} · ${first.ticker}${suppliers.length > 1 ? ` +${suppliers.length - 1}` : ''}`;
+}
+
+function supplierStatusLabel(status: NonNullable<AtlasPart['suppliers']>[number]['relationshipStatus']) {
+  return status === 'confirmed' ? 'Confirmed' : status === 'reported' ? 'Reported' : 'Rumor';
+}
 
 function useCompactLayout() {
   const [compact, setCompact] = useState(false);
@@ -67,7 +79,8 @@ export default function FoundryHome() {
     const term = partQuery.trim().toLowerCase();
     return atlas.parts.filter((part) => {
       const inSystem = activeSystem === 'All systems' || part.system === activeSystem;
-      const matches = !term || `${part.name} ${part.system} ${part.sourceId} ${part.vendor?.company ?? ''} ${part.vendor?.ticker ?? ''}`.toLowerCase().includes(term);
+      const supplierTerms = (part.suppliers ?? []).map((supplier) => `${supplier.company} ${supplier.ticker} ${supplier.relationshipStatus}`).join(' ');
+      const matches = !term || `${part.name} ${part.system} ${part.sourceId} ${supplierTerms}`.toLowerCase().includes(term);
       return inSystem && matches;
     });
   }, [activeSystem, atlas.parts, partQuery]);
@@ -75,7 +88,7 @@ export default function FoundryHome() {
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
   const hasIllustratedExplosion = Boolean(atlas.explodedImage);
   const showingEveryPart = visibleParts.length === atlas.parts.length;
-  const vendorCount = atlas.parts.filter((part) => part.vendor).length;
+  const supplierCount = new Set(atlas.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.yahooSymbol.toUpperCase()))).size;
 
   useEffect(() => {
     if (!visibleParts.some((part) => part.id === selectedId) && visibleParts[0]) setSelectedId(visibleParts[0].id);
@@ -99,7 +112,7 @@ export default function FoundryHome() {
       return;
     }
     setGenerating(true);
-    setNotice('Researching primary sources, then rendering a matched photorealistic assembled and exploded pair…');
+    setNotice('Building the deepest source-backed inventory available, then rendering a matched photorealistic assembled and exploded pair…');
     try {
       const response = await fetch('/api/generate-atlas', {
         method: 'POST',
@@ -187,7 +200,7 @@ export default function FoundryHome() {
           </div>
           <div className="foundry-mode">
             <i className={atlas.mode === 'generated' ? 'generated' : ''} />
-            <span><strong>{atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} systems{vendorCount ? ` · ${vendorCount} public vendors` : ''}</small></span>
+            <span><strong>{atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} components{supplierCount ? ` · ${supplierCount} public suppliers` : ''}</small></span>
           </div>
         </aside>
 
@@ -198,7 +211,7 @@ export default function FoundryHome() {
           </div>
           <div className="foundry-stage-grid" aria-hidden="true" />
           <div
-            className={`foundry-assembly${hasIllustratedExplosion ? ' rich-assembled' : ''}`}
+            className={`foundry-assembly${hasIllustratedExplosion ? ' rich-assembled' : ''}${atlas.imageOrientation === 'portrait' ? ' portrait' : ''}`}
             style={{
               opacity: hasIllustratedExplosion ? Math.max(0, 1 - explode * 1.45) : Math.max(0.12, 1 - explode * 0.9),
               transform: `translate(-50%, -50%) scale(${1 - explode * (hasIllustratedExplosion ? 0.06 : 0.16)})`,
@@ -209,7 +222,7 @@ export default function FoundryHome() {
           </div>
           {hasIllustratedExplosion && (
             <div
-              className="foundry-exploded-visual"
+              className={`foundry-exploded-visual${atlas.imageOrientation === 'portrait' ? ' portrait' : ''}`}
               style={{
                 transform: `translate(-50%, -50%) scale(${0.97 + explode * 0.03})`,
               }}
@@ -274,11 +287,11 @@ export default function FoundryHome() {
                       } as CSSProperties}
                       disabled={explode < 0.12}
                       onClick={() => setSelectedId(part.id)}
-                      aria-label={`Select ${part.name}${part.vendor ? `, supplied by ${part.vendor.company}` : ''}`}
+                      aria-label={`Select ${part.name}${part.suppliers?.length ? `, with ${part.suppliers.length} public supplier ${part.suppliers.length === 1 ? 'record' : 'records'}` : ''}`}
                       aria-pressed={active}
                     >
                       <i>{String(partIndex + 1).padStart(2, '0')}</i>
-                      <span><strong>{part.name}</strong>{part.vendor && <small>{part.vendor.company} · {part.vendor.ticker}</small>}</span>
+                      <span><strong>{part.name}</strong>{part.suppliers?.length ? <small>{supplierSummary(part)}</small> : null}</span>
                     </button>
                   ));
                 })}
@@ -301,7 +314,7 @@ export default function FoundryHome() {
                   onClick={() => setSelectedId(part.id)}
                 >
                   <i>{String(index + 1).padStart(2, '0')}</i>
-                  <span><strong>{part.name}</strong><small>{part.vendor ? `${part.vendor.company} · ${part.vendor.ticker}` : part.system}</small></span>
+                  <span><strong>{part.name}</strong><small>{supplierSummary(part) || part.system}</small></span>
                 </button>
               );
             })}
@@ -325,15 +338,25 @@ export default function FoundryHome() {
                 <div><dt>Evidence</dt><dd>{selectedPart.confidence}</dd></div>
                 <div><dt>References</dt><dd>{selectedSources.length || 'Catalog'}</dd></div>
               </dl>
-              {selectedPart.vendor && (
-                <div className="foundry-vendor">
-                  <span>PUBLIC COMPANY VENDOR</span>
-                  <div><strong>{selectedPart.vendor.company}</strong><small>{selectedPart.vendor.exchange} · {selectedPart.vendor.ticker}</small></div>
-                  <a href={selectedPart.vendor.financeUrl} target="_blank" rel="noreferrer" aria-label={`View ${selectedPart.vendor.company} on Yahoo Finance`}>
-                    YAHOO FINANCE <ExternalLink />
-                  </a>
+              {selectedPart.suppliers?.length ? (
+                <div className="foundry-suppliers">
+                  <span>PUBLIC COMPANY SUPPLIERS / VENDORS</span>
+                  {selectedPart.suppliers.map((supplier) => (
+                    <div className={`foundry-supplier ${supplier.relationshipStatus}`} key={`${supplier.yahooSymbol}-${supplier.relationshipStatus}`}>
+                      <div className="supplier-heading">
+                        <i>{supplierStatusLabel(supplier.relationshipStatus)}</i>
+                        <strong>{supplier.company}</strong>
+                        <small>{supplier.exchange} · {supplier.ticker}</small>
+                      </div>
+                      <p>{supplier.note}</p>
+                      <a href={supplier.financeUrl} target="_blank" rel="noreferrer" aria-label={`View ${supplier.company} on Yahoo Finance`}>
+                        YAHOO FINANCE <ExternalLink />
+                      </a>
+                    </div>
+                  ))}
+                  <p className="supplier-disclaimer">Reported and rumor labels are claims from the linked source—not confirmation or investment advice.</p>
                 </div>
-              )}
+              ) : null}
               <div className="foundry-citations">
                 <span>SUPPORTING SOURCES</span>
                 {selectedSources.length ? selectedSources.map((source) => (
@@ -350,8 +373,8 @@ export default function FoundryHome() {
 
       <section className="foundry-footnotes">
         <div><span className="foundry-section-number">03 / RESEARCH NOTE</span><p>{atlas.summary}</p></div>
-        <div className="source-register"><span className="foundry-section-number">SOURCE REGISTER</span>{atlas.sources.slice(0, 4).map((source, index) => <a key={source.id} href={source.url} target="_blank" rel="noreferrer"><i>{String(index + 1).padStart(2, '0')}</i><span>{source.publisher}</span><ExternalLink /></a>)}</div>
-        <div className="foundry-boundary"><BookOpen /><p><strong>Conceptual by default.</strong> Generated atlases explain documented major components. They do not infer hidden geometry. When an authoritative mesh dataset exists, use a verified 3D edition—like the human atlas.</p></div>
+        <div className="source-register"><span className="foundry-section-number">SOURCE REGISTER</span>{atlas.sources.map((source, index) => <a key={source.id} href={source.url} target="_blank" rel="noreferrer"><i>{String(index + 1).padStart(2, '0')}</i><span>{source.publisher}</span><ExternalLink /></a>)}</div>
+        <div className="foundry-boundary"><BookOpen /><p><strong>Conceptual by default.</strong> Generated atlases explain the deepest documented component set that fits a readable plate. They do not infer hidden geometry. Supplier claims are labeled confirmed, reported, or rumor. When an authoritative mesh dataset exists, use a verified 3D edition—like the human atlas.</p></div>
       </section>
     </main>
   );
