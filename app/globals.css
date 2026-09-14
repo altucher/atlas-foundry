@@ -393,6 +393,10 @@ a { color: inherit; }
 .foundry-stage-head { position: absolute; z-index: 8; top: 21px; left: 24px; right: 24px; display: flex; justify-content: space-between; color: #6c6f67; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; letter-spacing: .15em; }
 .foundry-stage-grid { position: absolute; inset: 0; opacity: .18; background-image: linear-gradient(#dcd4c411 1px, transparent 1px), linear-gradient(90deg, #dcd4c411 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(circle at center, #000, transparent 78%); }
 .foundry-build-journal { position: absolute; z-index: 14; inset: 54px 28px 116px; display: flex; flex-direction: column; justify-content: center; padding: clamp(20px, 4vw, 46px); border: 1px solid #d4c49b30; background: radial-gradient(circle at 50% 42%, #25251eeb, #0b0c0af5 72%); box-shadow: 0 28px 80px #000b, inset 0 1px #ffffff08; backdrop-filter: blur(14px); }
+.foundry-build-journal.background { inset: 58px 18px auto auto; width: min(420px, calc(100% - 36px)); min-height: 0; justify-content: flex-start; padding: 12px 14px; pointer-events: none; background: #11120fe8; box-shadow: 0 12px 34px #0009, inset 0 1px #ffffff08; backdrop-filter: blur(10px); }
+.foundry-build-journal.background .build-journal-feed { max-height: 76px; display: flex; flex-direction: column; justify-content: flex-end; margin: 8px 0 0; }
+.foundry-build-journal.background .build-journal-feed p { padding: 3px 0; font-size: 8px; }
+.foundry-build-journal.background > small { display: none; }
 .build-journal-title { display: flex; align-items: center; gap: 10px; color: #c6b78f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; letter-spacing: .18em; }
 .build-journal-title svg { width: 14px; }
 .foundry-build-journal .spin { animation: foundry-spin 1s linear infinite; }
@@ -587,6 +591,7 @@ a { color: inherit; }
   .foundry-mode { margin-top: 12px; padding-top: 12px; }
   .foundry-stage { min-height: 680px; }
   .foundry-build-journal { inset: 47px 10px 109px; justify-content: flex-start; padding: 22px 18px; }
+  .foundry-build-journal.background { inset: 47px 8px auto; width: auto; padding: 10px 12px; }
   .build-journal-feed { max-height: 390px; margin-block: 18px 14px; }
   .build-journal-feed p { grid-template-columns: 58px minmax(0, 1fr); gap: 9px; font-size: 9px; }
   .foundry-assembly { top: 43%; width: 91%; }

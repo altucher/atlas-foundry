@@ -89,6 +89,7 @@ export type FoundryAtlas = {
   hotspots?: Record<string, AtlasHotspot | AtlasHotspot[]>;
   mode: 'curated' | 'generated' | 'authoritative-3d';
   generatedAt?: string;
+  buildStage?: 'draft' | 'complete';
   archive?: AtlasArchive;
 };
 

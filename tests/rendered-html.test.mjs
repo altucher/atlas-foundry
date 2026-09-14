@@ -55,6 +55,9 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /responses\/\$\{encodeURIComponent\(responseId\)\}/);
   assert.match(generationRoute, /gpt-5\.6-terra/);
   assert.match(generationRoute, /gpt-5\.6-luna/);
+  assert.match(generationRoute, /defaultDraftModel = 'gpt-5\.4-mini'/);
+  assert.match(generationRoute, /phase === 'enrich'/);
+  assert.match(generationRoute, /saveAtlasDraft/);
   assert.match(generationRoute, /defaultSupplierResearchModel = 'gpt-6-astra'/);
   assert.match(generationRoute, /do not return the product's own brand as an integrator/);
   assert.match(generationRoute, /x-atlas-force-refresh/);
@@ -90,6 +93,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /new AbortController\(\)/);
   assert.match(page, /setAtlas\(pendingAtlas\(item.subject\)\)/);
   assert.match(page, /foundry-build-journal/);
+  assert.match(page, /SUPPLIER RESEARCH/);
+  assert.match(page, /phase: 'enrich'/);
   assert.match(page, /COMPONENT AUDIT/);
   assert.match(page, /Open evidence for/);
   assert.match(page, /RESEARCH LAYERS/);

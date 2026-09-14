@@ -87,6 +87,48 @@ type BuildJournalEntry = {
   message: string;
 };
 
+type AtlasPayload = {
+  atlas?: FoundryAtlas;
+  error?: string;
+  code?: string;
+  imageWarning?: string;
+  cacheWarning?: string;
+  cached?: boolean;
+  draft?: boolean;
+  enrichmentPending?: boolean;
+  enriched?: boolean;
+};
+
+async function readAtlasResponse(response: Response, onProgress: (stage: string, message: string) => void) {
+  let payload: AtlasPayload = {};
+  let resultStatus = response.status;
+  if (!response.headers.get('content-type')?.includes('application/x-ndjson') || !response.body) {
+    return { payload: await response.json() as AtlasPayload, resultStatus };
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const processLine = (line: string) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as { type?: string; stage?: string; message?: string; status?: number; payload?: AtlasPayload };
+    if (event.type === 'progress' && event.message) onProgress(event.stage ?? 'build', event.message);
+    if (event.type === 'result') {
+      payload = event.payload ?? {};
+      resultStatus = event.status ?? resultStatus;
+    }
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+    for (const line of lines) processLine(line);
+    if (done) break;
+  }
+  processLine(buffer);
+  return { payload, resultStatus };
+}
+
 function pendingAtlas(subject: string): FoundryAtlas {
   return {
     subject,
@@ -118,6 +160,7 @@ export default function FoundryHome() {
   const [gallery, setGallery] = useState<AtlasGalleryItem[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [enriching, setEnriching] = useState(false);
   const [buildSubject, setBuildSubject] = useState('');
   const [buildJournal, setBuildJournal] = useState<BuildJournalEntry[]>([]);
   const [notice, setNotice] = useState('');
@@ -223,6 +266,7 @@ export default function FoundryHome() {
     activeAbortRef.current = null;
     activeRequestRef.current += 1;
     setGenerating(false);
+    setEnriching(false);
     setPrompt(nextAtlas.subject);
     trackAnalytics('gallery_open', { atlas: nextAtlas.subject, source: 'curated' });
     loadAtlas(nextAtlas, message);
@@ -245,45 +289,19 @@ export default function FoundryHome() {
     setBuildSubject(subject);
     setBuildJournal([{ stage: 'request', message: `Preparing a source-backed build plan for ${subject}…` }]);
     setGenerating(true);
-    setNotice('Building the deepest source-backed inventory and supplier/IP map available, then rendering a matched assembled and exploded pair…');
+    setEnriching(false);
+    setNotice('Building a fast first draft now. Detailed supplier and IP research will continue after it appears.');
+    let draftDelivered = false;
     try {
       const response = await fetch('/api/generate-atlas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
-        body: JSON.stringify({ prompt: subject }),
+        body: JSON.stringify({ prompt: subject, phase: 'draft' }),
         signal: abortController.signal,
       });
-      type AtlasPayload = { atlas?: FoundryAtlas; error?: string; code?: string; imageWarning?: string; cacheWarning?: string; cached?: boolean };
-      let payload: AtlasPayload = {};
-      let resultStatus = response.status;
-      if (response.headers.get('content-type')?.includes('application/x-ndjson') && response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        const processLine = (line: string) => {
-          if (requestId !== activeRequestRef.current) return;
-          if (!line.trim()) return;
-          const event = JSON.parse(line) as { type?: string; stage?: string; message?: string; status?: number; payload?: AtlasPayload };
-          if (event.type === 'progress' && event.message) {
-            setBuildJournal((entries) => [...entries, { stage: event.stage ?? 'build', message: event.message! }].slice(-14));
-          }
-          if (event.type === 'result') {
-            payload = event.payload ?? {};
-            resultStatus = event.status ?? resultStatus;
-          }
-        };
-        while (true) {
-          const { done, value } = await reader.read();
-          buffer += decoder.decode(value, { stream: !done });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-          for (const line of lines) processLine(line);
-          if (done) break;
-        }
-        processLine(buffer);
-      } else {
-        payload = await response.json() as AtlasPayload;
-      }
+      const { payload, resultStatus } = await readAtlasResponse(response, (stage, message) => {
+        if (requestId === activeRequestRef.current) setBuildJournal((entries) => [...entries, { stage, message }].slice(-14));
+      });
       if (resultStatus < 200 || resultStatus >= 300 || !payload.atlas) {
         if (payload.code === 'NOT_CONFIGURED') {
           throw new Error('Live generation needs an OPENAI_API_KEY on the server. The curated Tesla and verified human atlases are ready to show now.');
@@ -292,6 +310,8 @@ export default function FoundryHome() {
       }
       const completion = payload.cached
         ? 'Loaded instantly from the shared gallery. No research or rendering was needed.'
+        : payload.draft
+          ? 'First draft ready. Every component is explorable while supplier and IP research continues.'
         : payload.imageWarning
           ? `Research complete. ${payload.imageWarning}`
           : payload.cacheWarning
@@ -299,11 +319,41 @@ export default function FoundryHome() {
             : 'Component, supplier/IP, rendering, and gallery research complete. Select any numbered component to inspect it.';
       if (requestId !== activeRequestRef.current) return;
       loadAtlas(payload.atlas, completion);
+      draftDelivered = Boolean(payload.draft);
       trackAnalytics('atlas_result', { query: subject, atlas: payload.atlas.subject, status: 'success', cached: Boolean(payload.cached) });
-      if (!payload.cached) void refreshGallery();
+      setGenerating(false);
+      if (payload.enrichmentPending && payload.atlas.cacheKey) {
+        setEnriching(true);
+        setNotice('First draft ready. You can explore and use the explosion slider while detailed supplier and IP research continues.');
+        const enrichmentResponse = await fetch('/api/generate-atlas', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+          body: JSON.stringify({ prompt: subject, phase: 'enrich' }),
+          signal: abortController.signal,
+        });
+        const enrichment = await readAtlasResponse(enrichmentResponse, (stage, message) => {
+          if (requestId === activeRequestRef.current) setBuildJournal((entries) => [...entries, { stage, message }].slice(-14));
+        });
+        if (requestId !== activeRequestRef.current) return;
+        if (enrichment.resultStatus >= 200 && enrichment.resultStatus < 300 && enrichment.payload.atlas) {
+          setAtlas(enrichment.payload.atlas);
+          setNotice('Supplier and IP research complete. This finished edition is now saved for instant reuse.');
+          trackAnalytics('atlas_result', { query: subject, atlas: enrichment.payload.atlas.subject, status: 'enriched', cached: false });
+          void refreshGallery();
+        } else {
+          setNotice(enrichment.payload.error ?? 'The first draft remains available; detailed supplier research can be retried later.');
+        }
+      } else if (!payload.cached) {
+        void refreshGallery();
+      }
     } catch (error) {
       if (requestId !== activeRequestRef.current) return;
       const message = error instanceof Error ? error.message : 'The atlas could not be generated.';
+      if (draftDelivered) {
+        setNotice('The first draft remains fully usable. Detailed supplier research was interrupted and can be retried later.');
+        trackAnalytics('atlas_result', { query: subject, atlas: atlas.subject, status: 'enrichment-failed', error: message });
+        return;
+      }
       setAtlas((current) => ({
         ...current,
         subtitle: 'Build did not complete',
@@ -315,6 +365,7 @@ export default function FoundryHome() {
       if (requestId === activeRequestRef.current) {
         activeAbortRef.current = null;
         setGenerating(false);
+        setEnriching(false);
       }
     }
   }
@@ -336,6 +387,7 @@ export default function FoundryHome() {
     setBuildSubject(item.subject);
     setBuildJournal([{ stage: 'cache', message: 'Opening the finished atlas from the shared gallery…' }]);
     setGenerating(true);
+    setEnriching(false);
     setNotice(`Opening ${item.subject} from the shared gallery…`);
     trackAnalytics('gallery_open', { atlas: item.subject, cacheKey: item.cacheKey, source: 'shared' });
     requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
@@ -518,13 +570,13 @@ export default function FoundryHome() {
                     <span><strong>{vendor.company}</strong><em>{vendor.ticker ?? 'PRIVATE'}</em></span>
                     <small>{vendor.partIds.length} {vendor.partIds.length === 1 ? 'PART' : 'PARTS'}</small>
                   </button>
-                )) : <p>No sourced vendors for this atlas.</p>}
+                )) : <p>{enriching ? 'Researching suppliers and IP in the background…' : 'No sourced vendors for this atlas.'}</p>}
               </div>
             )}
           </div>
           <div className="foundry-mode">
             <i className={atlas.mode === 'generated' ? 'generated' : ''} />
-            <span><strong>{atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} components{supplierCount ? ` · ${supplierCount} vendors` : ''}</small></span>
+            <span><strong>{atlas.buildStage === 'draft' ? 'Fast first draft' : atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} components{atlas.buildStage === 'draft' ? ' · supplier research running' : supplierCount ? ` · ${supplierCount} vendors` : ''}</small></span>
           </div>
         </aside>
 
@@ -534,9 +586,9 @@ export default function FoundryHome() {
             <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
           </div>
           <div className="foundry-stage-grid" aria-hidden="true" />
-          {generating && (
-            <div className="foundry-build-journal" role="status" aria-live="polite">
-              <div className="build-journal-title"><LoaderCircle className="spin" /><span>BUILDING / {buildSubject.toUpperCase()}</span></div>
+          {(generating || enriching) && (
+            <div className={`foundry-build-journal${enriching ? ' background' : ''}`} role="status" aria-live="polite">
+              <div className="build-journal-title"><LoaderCircle className="spin" /><span>{generating ? 'FIRST DRAFT' : 'SUPPLIER RESEARCH'} / {buildSubject.toUpperCase()}</span></div>
               <div className="build-journal-feed">
                 {buildJournal.map((entry, index) => (
                   <p key={`${entry.stage}-${index}`} style={{ opacity: 0.28 + ((index + 1) / Math.max(buildJournal.length, 1)) * 0.68 }}>
@@ -544,7 +596,7 @@ export default function FoundryHome() {
                   </p>
                 ))}
               </div>
-              <small>Research and high-resolution image rendering can take several minutes. Finished subjects reopen instantly from the gallery.</small>
+              <small>{generating ? 'The component atlas and image pair arrive first.' : 'The atlas is usable now. Detailed supplier, generation, alternate-vendor, and IP evidence is being added in the background.'}</small>
             </div>
           )}
           <div

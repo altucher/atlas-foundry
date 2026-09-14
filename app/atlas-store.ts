@@ -30,6 +30,10 @@ function atlasPath(cacheKey: string) {
   return `${galleryPrefix}/${cacheKey}/atlas.json`;
 }
 
+function draftPath(cacheKey: string) {
+  return `${galleryPrefix}/${cacheKey}/draft.json`;
+}
+
 function isFoundryAtlas(value: unknown): value is FoundryAtlas {
   if (!value || typeof value !== 'object') return false;
   const atlas = value as Partial<FoundryAtlas>;
@@ -63,6 +67,16 @@ export async function loadCachedAtlas(cacheKey: string) {
   return null;
 }
 
+export async function loadAtlasDraft(cacheKey: string) {
+  if (!hasSharedAtlasStore()) return null;
+  try {
+    const blob = await head(draftPath(cacheKey));
+    return await readAtlasUrl(blob.url);
+  } catch {
+    return null;
+  }
+}
+
 function decodeDataImage(value: string) {
   const match = /^data:(image\/(?:webp|png|jpeg));base64,([A-Za-z0-9+/=\s]+)$/.exec(value);
   if (!match) return null;
@@ -91,8 +105,26 @@ export async function saveAtlasToGallery(atlas: FoundryAtlas, prompt: string) {
     persistImage(cacheKey, 'assembled', atlas.image),
     persistImage(cacheKey, 'exploded', atlas.explodedImage),
   ]);
-  const persisted: FoundryAtlas = { ...atlas, intelligenceVersion: CURRENT_INTELLIGENCE_VERSION, cacheKey, image, explodedImage };
+  const persisted: FoundryAtlas = { ...atlas, intelligenceVersion: CURRENT_INTELLIGENCE_VERSION, cacheKey, image, explodedImage, buildStage: 'complete' };
   await put(atlasPath(cacheKey), JSON.stringify(persisted), {
+    access: 'public',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    contentType: 'application/json',
+    cacheControlMaxAge: 60,
+  });
+  return persisted;
+}
+
+export async function saveAtlasDraft(atlas: FoundryAtlas, prompt: string) {
+  if (!hasSharedAtlasStore()) return { ...atlas, cacheKey: cacheKeyForPrompt(prompt), buildStage: 'draft' as const };
+  const cacheKey = cacheKeyForPrompt(prompt);
+  const [image, explodedImage] = await Promise.all([
+    persistImage(cacheKey, 'assembled', atlas.image),
+    persistImage(cacheKey, 'exploded', atlas.explodedImage),
+  ]);
+  const persisted: FoundryAtlas = { ...atlas, cacheKey, image, explodedImage, buildStage: 'draft' };
+  await put(draftPath(cacheKey), JSON.stringify(persisted), {
     access: 'public',
     addRandomSuffix: false,
     allowOverwrite: true,

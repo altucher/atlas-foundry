@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Agent, fetch as undiciFetch } from 'undici';
 
-import { cacheKeyForPrompt, loadCachedAtlas, saveAtlasToGallery } from '@/app/atlas-store';
+import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
 
 export const runtime = 'nodejs';
@@ -10,11 +10,11 @@ export const runtime = 'nodejs';
 // compute permits up to 800 seconds; deployments need a plan that accepts it.
 export const maxDuration = 800;
 
-// Luna makes the first useful atlas arrive quickly. Deeper archive passes retain
-// Terra, and the forensic named-product supplier audit retains Astra.
+// Mini creates the visible first draft. The user can explore it while the deeper
+// supplier/IP pass continues independently with Terra or Astra.
+const defaultDraftModel = 'gpt-5.4-mini';
 const defaultResearchModel = 'gpt-5.6-luna';
 const defaultDeepResearchModel = 'gpt-5.6-terra';
-const defaultInitialSupplierResearchModel = 'gpt-5.6-terra';
 const defaultSupplierResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
 const requestWindows = new Map<string, number[]>();
@@ -97,9 +97,9 @@ type ProgressReporter = (entry: { stage: ProgressStage; message: string }) => vo
 type AiConnection = {
   apiKey: string;
   baseUrl: string;
+  draftModel: string;
   researchModel: string;
   deepResearchModel: string;
-  initialSupplierResearchModel: string;
   supplierResearchModel: string;
   imageModel: string;
 };
@@ -113,9 +113,9 @@ function directOpenAiModel(model: string) {
 }
 
 function getAiConnection(request: Request): AiConnection | null {
+  const configuredDraftModel = process.env.OPENAI_DRAFT_MODEL ?? defaultDraftModel;
   const configuredResearchModel = process.env.OPENAI_RESEARCH_MODEL ?? defaultResearchModel;
   const configuredDeepResearchModel = process.env.OPENAI_DEEP_RESEARCH_MODEL ?? defaultDeepResearchModel;
-  const configuredInitialSupplierResearchModel = process.env.OPENAI_INITIAL_SUPPLIER_RESEARCH_MODEL ?? defaultInitialSupplierResearchModel;
   const configuredSupplierResearchModel = process.env.OPENAI_SUPPLIER_RESEARCH_MODEL ?? defaultSupplierResearchModel;
   const configuredImageModel = process.env.OPENAI_IMAGE_MODEL ?? defaultImageModel;
   const directApiKey = process.env.OPENAI_API_KEY;
@@ -124,9 +124,9 @@ function getAiConnection(request: Request): AiConnection | null {
     return {
       apiKey: directApiKey,
       baseUrl: 'https://api.openai.com/v1',
+      draftModel: directOpenAiModel(configuredDraftModel),
       researchModel: directOpenAiModel(configuredResearchModel),
       deepResearchModel: directOpenAiModel(configuredDeepResearchModel),
-      initialSupplierResearchModel: directOpenAiModel(configuredInitialSupplierResearchModel),
       supplierResearchModel: directOpenAiModel(configuredSupplierResearchModel),
       imageModel: directOpenAiModel(configuredImageModel),
     };
@@ -139,9 +139,9 @@ function getAiConnection(request: Request): AiConnection | null {
     return {
       apiKey: gatewayCredential,
       baseUrl: 'https://ai-gateway.vercel.sh/v1',
+      draftModel: gatewayModel(configuredDraftModel),
       researchModel: gatewayModel(configuredResearchModel),
       deepResearchModel: gatewayModel(configuredDeepResearchModel),
-      initialSupplierResearchModel: gatewayModel(configuredInitialSupplierResearchModel),
       supplierResearchModel: gatewayModel(configuredSupplierResearchModel),
       imageModel: gatewayModel(configuredImageModel),
     };
@@ -984,7 +984,7 @@ async function assessGeneratedImage(
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: connection.researchModel,
+      model: connection.draftModel,
       reasoning: { effort: 'low' },
       instructions: `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a reference copy merely because other parts are exploded.`,
       input: [{ role: 'user', content: [{ type: 'input_image', image_url: image, detail: 'high' }] }],
@@ -1060,9 +1060,11 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
 
 export async function POST(request: Request) {
   let prompt = '';
+  let phase: 'draft' | 'enrich' = 'draft';
   try {
-    const body = (await request.json()) as { prompt?: unknown };
+    const body = (await request.json()) as { prompt?: unknown; phase?: unknown };
     prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+    phase = body.phase === 'enrich' ? 'enrich' : 'draft';
   } catch {
     return NextResponse.json({ error: 'Send a JSON body with a prompt.' }, { status: 400 });
   }
@@ -1083,7 +1085,7 @@ export async function POST(request: Request) {
             ...(request.headers.get('x-atlas-force-refresh') === '1' ? { 'X-Atlas-Force-Refresh': '1' } : {}),
             ...(request.headers.get('x-atlas-deep-build') === '1' ? { 'X-Atlas-Deep-Build': '1' } : {}),
           },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, phase }),
           cache: 'no-store',
         });
         return new Response(response.body, {
@@ -1113,7 +1115,7 @@ export async function POST(request: Request) {
   const deepBuildKey = request.headers.get('x-atlas-deep-build') === '1' && ['data-center', 'falcon-9'].includes(promptCacheKey)
     ? promptCacheKey
     : null;
-  if (!forceRefresh && !deepBuildKey && cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
+  if (phase === 'draft' && !forceRefresh && !deepBuildKey && cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
     report({ stage: 'done', message: `Found ${cachedAtlas.subject} in the shared gallery.` });
     return NextResponse.json({ atlas: cachedAtlas, cached: true });
   }
@@ -1131,6 +1133,50 @@ export async function POST(request: Request) {
       { code: 'NOT_CONFIGURED', error: 'Live atlas generation is not configured on this deployment.' },
       { status: 503 },
     );
+  }
+
+  if (phase === 'enrich') {
+    const draft = await loadAtlasDraft(promptCacheKey);
+    if (!draft || !subjectMatchesRequest(prompt, draft.subject)) {
+      return NextResponse.json({ error: 'The first draft is no longer available for supplier enrichment.' }, { status: 409 });
+    }
+    try {
+      report({ stage: 'vendor', message: `The first draft is live. Auditing suppliers, alternates, generations, and embedded IP for ${draft.parts.length} components in the background…` });
+      const normalizedDraft = normalizeAtlas({ ...draft, visualPrompt: '' });
+      const [enriched, mappedHotspots] = await Promise.all([
+        enrichSuppliers({ ...connection, supplierResearchModel: connection.supplierResearchModel }, normalizedDraft, report),
+        draft.explodedImage
+          ? locateHotspots(connection, draft.explodedImage, normalizedDraft.parts).catch((error) => {
+              console.warn('Using draft hotspot layout', error);
+              return draft.hotspots ?? fallbackHotspots(normalizedDraft.parts);
+            })
+          : Promise.resolve(draft.hotspots),
+      ]);
+      report({ stage: 'save', message: 'Publishing the completed supplier and IP edition to the shared gallery…' });
+      const atlas = await saveAtlasToGallery({
+        ...draft,
+        subject: enriched.subject,
+        subtitle: enriched.subtitle,
+        category: enriched.category,
+        summary: enriched.summary,
+        accuracyNote: enriched.accuracyNote,
+        parts: enriched.parts,
+        sources: enriched.sources,
+        hotspots: mappedHotspots,
+        buildStage: 'complete',
+        generatedAt: new Date().toISOString(),
+      }, prompt);
+      report({ stage: 'done', message: 'Supplier and IP research complete. The finished edition is now saved for instant reuse.' });
+      return NextResponse.json({
+        atlas,
+        cached: false,
+        enriched: true,
+        supplierResearchModel: connection.supplierResearchModel,
+      });
+    } catch (error) {
+      console.error('Background supplier enrichment failed', error);
+      return NextResponse.json({ error: 'The first draft remains usable, but supplier research could not finish this time.' }, { status: 500 });
+    }
   }
 
   const clientId = request.headers.get('cf-connecting-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
@@ -1186,10 +1232,10 @@ Use connections to explain architecture. For each part, list up to ten directly 
 Set imageOrientation to portrait for strongly vertical subjects such as launch vehicles, towers, standing anatomy, or long upright tools; otherwise use landscape. The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, literally exhaustive parts database, or investment recommendation.`;
 
   try {
-    report({ stage: 'research', message: `Searching authoritative public sources for ${prompt}…` });
+    report({ stage: 'research', message: `Fast first pass · mapping ${prompt} with ${defaultDraftModel}…` });
     const responsePayload = await generateResearchWithFallback(connection, {
-        model: connection.researchModel,
-        reasoning: { effort: 'none' },
+        model: connection.draftModel,
+        reasoning: { effort: 'low' },
         instructions,
         input: `Build a component atlas for: ${prompt}`,
         tools: [{ type: 'web_search', search_context_size: 'low' }],
@@ -1204,19 +1250,12 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     for (const source of normalized.sources) {
       report({ stage: 'source', message: `Source · ${source.publisher} — ${source.title}` });
     }
-    report({ stage: 'render', message: 'Rendering a matched photorealistic assembled and exploded image pair…' });
-    const [enriched, imageResults] = await Promise.all([
-      enrichSuppliers({ ...connection, supplierResearchModel: connection.initialSupplierResearchModel }, normalized, report).catch((error) => {
-        console.warn('Dedicated supplier evidence pass failed', error);
-        report({ stage: 'vendor', message: 'The dedicated supplier pass was incomplete; retaining relationships established by the architecture research.' });
-        return normalized;
-      }),
-      Promise.allSettled([
-        generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
-          .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
-        generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation)
-          .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
-      ]),
+    report({ stage: 'render', message: 'Fast image pass · rendering the assembled and exploded views in parallel…' });
+    const imageResults = await Promise.allSettled([
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
+        .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation)
+        .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
     ]);
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
     const explodedImage = imageResults[1].status === 'fulfilled' ? imageResults[1].value : undefined;
@@ -1224,51 +1263,50 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       ? [`${index === 0 ? 'Assembled' : 'Exploded'} image: ${result.reason instanceof Error ? result.reason.message : 'generation failed.'}`]
       : []);
     const imageWarning = imageWarnings.length ? imageWarnings.join(' ') : undefined;
-    let hotspots = explodedImage ? fallbackHotspots(enriched.parts) : undefined;
-    if (explodedImage) {
-      report({ stage: 'mapping', message: `Mapping ${enriched.parts.length} clickable component regions onto the exploded render…` });
-      try {
-        hotspots = await locateHotspots(connection, explodedImage, enriched.parts);
-        report({ stage: 'mapping', message: 'Clickable component map complete.' });
-      } catch (error) {
-        console.warn('Using fallback hotspot layout', error);
-        report({ stage: 'mapping', message: 'Using the non-overlapping fallback component map.' });
-      }
-    }
+    const hotspots = explodedImage ? fallbackHotspots(normalized.parts) : undefined;
+    report({ stage: 'mapping', message: 'First-pass clickable component map ready; precise visual mapping will refine in the background.' });
     let atlas: FoundryAtlas = {
-      subject: enriched.subject,
-      subtitle: enriched.subtitle,
-      category: enriched.category,
-      summary: enriched.summary,
-      accuracyNote: enriched.accuracyNote,
-      parts: enriched.parts,
-      sources: enriched.sources,
+      subject: normalized.subject,
+      subtitle: normalized.subtitle,
+      category: normalized.category,
+      summary: normalized.summary,
+      accuracyNote: normalized.accuracyNote,
+      parts: normalized.parts.map((part) => ({
+        ...part,
+        supplierResearch: part.suppliers?.length
+          ? { status: 'sourced', summary: 'Readily established relationships from the first pass; the component-level audit is still running.' }
+          : { status: 'incomplete', summary: 'Component-level supplier, generation, alternate-vendor, and IP research is running in the background.' },
+      })),
+      sources: normalized.sources,
       image,
       imageAlt: `Photorealistic AI-generated assembled reference view of ${normalized.subject}`,
       explodedImage,
       explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${normalized.subject}`,
-      imageOrientation: enriched.imageOrientation,
+      imageOrientation: normalized.imageOrientation,
       hotspots,
       mode: 'generated',
       generatedAt: new Date().toISOString(),
+      buildStage: 'draft',
     };
     let cacheWarning: string | undefined;
     try {
-      report({ stage: 'save', message: 'Saving the atlas and image pair to the shared gallery…' });
-      atlas = await saveAtlasToGallery(atlas, prompt);
-      report({ stage: 'done', message: 'Atlas complete and ready for instant reuse.' });
+      report({ stage: 'save', message: 'Saving the first draft so deeper research can continue independently…' });
+      atlas = await saveAtlasDraft(atlas, prompt);
+      report({ stage: 'done', message: 'First draft ready. Supplier and IP research is continuing in the background.' });
     } catch (error) {
       console.warn('Atlas generated but could not be added to the gallery', error);
-      cacheWarning = 'The atlas was generated, but the shared gallery could not save it this time.';
-      report({ stage: 'done', message: 'Atlas complete; the gallery save was unavailable.' });
+      cacheWarning = 'The first draft is ready, but background enrichment cannot start because temporary storage was unavailable.';
+      report({ stage: 'done', message: 'First draft ready; background enrichment storage was unavailable.' });
     }
     return NextResponse.json({
       atlas,
       cached: false,
+      draft: true,
+      enrichmentPending: !cacheWarning,
       imageWarning,
       cacheWarning,
-      researchModel: connection.researchModel,
-      supplierResearchModel: connection.initialSupplierResearchModel,
+      researchModel: connection.draftModel,
+      supplierResearchModel: connection.supplierResearchModel,
       imageModel: connection.imageModel,
     });
   } catch (error) {
