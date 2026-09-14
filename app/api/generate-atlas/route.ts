@@ -13,11 +13,44 @@ export const maxDuration = 800;
 // Terra retains flagship-class web research and structured output while staying
 // inside the gateway's upstream response window for 36–60 part architectures.
 const defaultResearchModel = 'gpt-5.6-terra';
+const defaultSupplierResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
 const requestWindows = new Map<string, number[]>();
 const windowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 3;
 const supplierRoles = ['manufacturer', 'assembler', 'designer', 'ip-licensor', 'software-provider', 'material-supplier', 'integrator', 'other'] as const;
+const dataCenterDeepLayers = [
+  {
+    id: 'site-building',
+    label: 'Site & building',
+    focus: 'site selection interfaces, civil works, building shell, structural bays, loading and staging, utility entrances, grounding, lightning protection, physical rooms, containment boundaries, and maintainable facility pathways',
+  },
+  {
+    id: 'electrical-chain',
+    label: 'Electrical chain',
+    focus: 'utility service through substations, transformers, medium-voltage and low-voltage switchgear, generators and fuel, transfer systems, UPS internals and energy storage, busway, PDUs, rack PDUs, branch protection, grounding, telemetry, and board-level conversion to accelerator rails',
+  },
+  {
+    id: 'thermal-water',
+    label: 'Thermal & water',
+    focus: 'heat rejection and water paths from chillers, cooling towers or dry coolers through pumps, valves, heat exchangers, treatment, CRAH/in-row systems, containment, CDUs, manifolds, quick disconnects, cold plates, immersion alternatives, leak detection, and controls',
+  },
+  {
+    id: 'rack-silicon',
+    label: 'Rack to silicon',
+    focus: 'rack mechanics, shelves, compute sleds, chassis, motherboards, CPUs, GPUs and accelerators, DPUs, memory, storage media and controllers, power shelves, VRMs, BMCs, firmware, substrates, packaging, chiplets, cooling interfaces, connectors, cables, and licensed IP',
+  },
+  {
+    id: 'network-storage',
+    label: 'Network, optics & storage',
+    focus: 'carrier entrances and meet-me rooms through ODFs, structured fiber, leaf/spine and management fabrics, NICs, DPUs, switches, copper and optical links, DSPs, lasers, modulators, photodiodes, connectors, DCI, storage nodes, media, fabrics, and data-protection paths',
+  },
+  {
+    id: 'controls-safety',
+    label: 'Controls, safety & operations',
+    focus: 'BMS, EPMS, DCIM, orchestration, telemetry sensors, time synchronization, access control, video security, fire detection and suppression, life safety, environmental monitoring, spares, maintenance isolation, commissioning, and operating interfaces',
+  },
+] as const;
 const aiDispatcher = new Agent({
   headersTimeout: 780_000,
   bodyTimeout: 780_000,
@@ -31,6 +64,7 @@ type AiConnection = {
   apiKey: string;
   baseUrl: string;
   researchModel: string;
+  supplierResearchModel: string;
   imageModel: string;
 };
 
@@ -44,6 +78,7 @@ function directOpenAiModel(model: string) {
 
 function getAiConnection(request: Request): AiConnection | null {
   const configuredResearchModel = process.env.OPENAI_RESEARCH_MODEL ?? defaultResearchModel;
+  const configuredSupplierResearchModel = process.env.OPENAI_SUPPLIER_RESEARCH_MODEL ?? defaultSupplierResearchModel;
   const configuredImageModel = process.env.OPENAI_IMAGE_MODEL ?? defaultImageModel;
   const directApiKey = process.env.OPENAI_API_KEY;
 
@@ -52,6 +87,7 @@ function getAiConnection(request: Request): AiConnection | null {
       apiKey: directApiKey,
       baseUrl: 'https://api.openai.com/v1',
       researchModel: directOpenAiModel(configuredResearchModel),
+      supplierResearchModel: directOpenAiModel(configuredSupplierResearchModel),
       imageModel: directOpenAiModel(configuredImageModel),
     };
   }
@@ -64,6 +100,7 @@ function getAiConnection(request: Request): AiConnection | null {
       apiKey: gatewayCredential,
       baseUrl: 'https://ai-gateway.vercel.sh/v1',
       researchModel: gatewayModel(configuredResearchModel),
+      supplierResearchModel: gatewayModel(configuredSupplierResearchModel),
       imageModel: gatewayModel(configuredImageModel),
     };
   }
@@ -292,6 +329,7 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
       supplierResearch: part.supplierResearch && ['sourced', 'searched-no-specific-evidence', 'not-applicable', 'incomplete'].includes(part.supplierResearch.status)
         ? { status: part.supplierResearch.status, summary: part.supplierResearch.summary.trim().slice(0, 360) }
         : undefined,
+      archiveLayer: part.archiveLayer?.trim().slice(0, 64) || undefined,
       connections: part.connections,
     };
   });
@@ -313,6 +351,99 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
     sources,
     parts: connectedParts,
   };
+}
+
+function archiveSlug(value: string) {
+  return value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 68) || 'component';
+}
+
+function archiveNameKey(value: string) {
+  return value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function mergeDataCenterLayers(base: FoundryAtlas, additions: Array<{ layer: (typeof dataCenterDeepLayers)[number]; atlas: FoundryAtlas }>) {
+  const sourcesByUrl = new Map(base.sources.map((source) => [source.url, source]));
+  const parts: AtlasPart[] = base.parts.map((part) => ({ ...part, archiveLayer: part.archiveLayer ?? 'Overview' }));
+  const usedIds = new Set(parts.map((part) => part.id));
+  const partIndexByName = new Map(parts.map((part, index) => [archiveNameKey(part.name), index]));
+
+  for (const { layer, atlas } of additions) {
+    for (const source of atlas.sources) if (!sourcesByUrl.has(source.url)) sourcesByUrl.set(source.url, source);
+    const idMap = new Map<string, string>();
+    for (const part of atlas.parts) {
+      const existingIndex = partIndexByName.get(archiveNameKey(part.name));
+      if (existingIndex !== undefined) {
+        idMap.set(part.id, parts[existingIndex].id);
+        continue;
+      }
+      const stem = `dc-${layer.id}-${archiveSlug(part.name)}`;
+      let id = stem;
+      let suffix = 2;
+      while (usedIds.has(id)) id = `${stem}-${suffix++}`;
+      usedIds.add(id);
+      idMap.set(part.id, id);
+    }
+
+    for (const incoming of atlas.parts) {
+      const id = idMap.get(incoming.id)!;
+      const remappedConnections = (incoming.connections ?? []).flatMap((connection) => {
+        const toPartId = idMap.get(connection.toPartId);
+        return toPartId && toPartId !== id ? [{ ...connection, toPartId }] : [];
+      });
+      const existingIndex = parts.findIndex((part) => part.id === id);
+      if (existingIndex === -1) {
+        const next = { ...incoming, id, archiveLayer: layer.label, connections: remappedConnections };
+        partIndexByName.set(archiveNameKey(next.name), parts.length);
+        parts.push(next);
+        continue;
+      }
+
+      const existing = parts[existingIndex];
+      const supplierMap = new Map([...(existing.suppliers ?? []), ...(incoming.suppliers ?? [])]
+        .map((supplier) => [`${supplier.company}|${supplier.role}|${supplier.relationshipStatus}|${supplier.evidenceUrl}`.toLowerCase(), supplier]));
+      const connectionMap = new Map([...(existing.connections ?? []), ...remappedConnections]
+        .map((connection) => [`${connection.toPartId}|${connection.relationship}|${connection.description}`.toLowerCase(), connection]));
+      parts[existingIndex] = {
+        ...existing,
+        description: incoming.description.length > existing.description.length ? incoming.description : existing.description,
+        sourceUrls: [...new Set([...existing.sourceUrls, ...incoming.sourceUrls])].slice(0, 30),
+        suppliers: [...supplierMap.values()].slice(0, 16),
+        supplierResearch: (existing.suppliers?.length || incoming.suppliers?.length)
+          ? { status: 'sourced', summary: incoming.supplierResearch?.summary ?? existing.supplierResearch?.summary ?? 'Sourced supplier relationships were retained across archive passes.' }
+          : incoming.supplierResearch ?? existing.supplierResearch,
+        connections: [...connectionMap.values()].slice(0, 20),
+      };
+    }
+  }
+
+  const layerMetadata = new Map((base.archive?.layers ?? [{
+    id: 'overview', label: 'Overview', focus: 'Facility-to-chip reference architecture',
+    partCount: base.parts.filter((part) => !part.archiveLayer || part.archiveLayer === 'Overview').length,
+    generatedAt: base.generatedAt ?? new Date().toISOString(),
+  }]).map((layer) => [layer.id, layer]));
+  for (const { layer, atlas } of additions) {
+    layerMetadata.set(layer.id, {
+      ...layer,
+      partCount: atlas.parts.length,
+      generatedAt: atlas.generatedAt ?? new Date().toISOString(),
+    });
+  }
+
+  return {
+    ...base,
+    subject: 'Data center',
+    subtitle: `${parts.length}-component multilevel facility-to-silicon research archive`,
+    summary: `${base.summary} This canonical archive adds separately explorable deep layers for site/building, the complete electrical and thermal chains, rack-to-silicon hardware, networking/optics/storage, and controls/safety/operations.`,
+    accuracyNote: `${base.accuracyNote} Deep layers are complementary vendor-neutral alternatives and do not imply that every component or vendor is installed together.`,
+    parts,
+    sources: [...sourcesByUrl.values()].map((source, index) => ({ ...source, id: `source-${index + 1}` })),
+    archive: {
+      canonicalKey: 'data-center',
+      aliases: ['data center', 'a data center', 'the data center', 'data centers'],
+      layers: [...layerMetadata.values()],
+    },
+    generatedAt: new Date().toISOString(),
+  } satisfies FoundryAtlas;
 }
 
 function fallbackHotspots(parts: AtlasPart[]) {
@@ -437,6 +568,8 @@ For displays, investigate the panel maker, display-module assembly, backlight or
 
 For a specific named product, only connect a vendor to a component when the evidence explicitly ties it to that product, product family, teardown, generation, model year, trim, market, factory, or period. A general corporate supplier list confirms that a company supplies the brand, but by itself does not prove which component it supplies. Use it as corroboration, not as an invented component mapping. For a generic category, a relationship may show that the vendor makes or sells that exact component class; the note must call it a representative market offering and not evidence of deployment in one facility.
 
+For a named product, do not return the product's own brand as an integrator, service-parts provider, or component vendor merely because it publishes a manual, specifies the component, sells a replacement assembly, or integrates the finished product. That relationship is inherent and adds no supplier intelligence. Retain the brand owner only for a genuinely component-specific design, software, or IP role—for example its authored SoC design or operating-system software—and state that role narrowly.
+
 Set confirmed only for first-party statements, regulatory records, procurement records, direct component markings/teardowns, or customer/supplier material that establishes the relationship. Set reported for a credible established technical, industry, or financial publication. Set rumored only when a real returned publication explicitly makes the claim. Do not convert repetition, resale listings, repair-shop marketing, or visual resemblance into evidence.
 
 Each note must state the role, exact product/version/time scope, whether the relationship is current, historical, alternative, or uncertain, and what the cited source actually establishes. Every evidenceUrl must exactly match one URL in sources. Use real HTTPS URLs consulted in this pass. Set current public-company ticker, exchange, and exact Yahoo symbol; use null for all three private-company fields. Return no relationship when evidence is inadequate.
@@ -444,7 +577,7 @@ Each note must state the role, exact product/version/time scope, whether the rel
 Coverage is an audit ledger, not a confidence performance. Return exactly one coverage entry for every supplied partId. Use sourced when at least one retained relationship is backed by a component-specific source; searched-no-specific-evidence when you searched the avenues above but found no sufficiently specific relationship; and not-applicable only when the item genuinely has no external vendor or IP relationship to research. The summary must briefly state which product-family/current/historical avenues were checked and why evidence was retained or withheld. Never omit a supplied partId.`;
   report({ stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} · checking ${parts.length} components individually…` });
   const payload = await generateResearchWithFallback(connection, {
-    model: connection.researchModel,
+    model: connection.supplierResearchModel,
     reasoning: { effort: 'low' },
     instructions,
     input: `Subject: ${atlas.subject}\nCategory: ${atlas.category}\nAccuracy boundary: ${atlas.accuracyNote}\n\nComponent ids:\n${partList}\n\nExisting architecture sources (use only when they directly support a relationship):\n${existingSources}`,
@@ -550,6 +683,75 @@ async function enrichSuppliers(
   return enriched;
 }
 
+async function researchDataCenterLayer(
+  connection: AiConnection,
+  layer: (typeof dataCenterDeepLayers)[number],
+  existing: FoundryAtlas,
+  report: ProgressReporter,
+) {
+  const existingNames = existing.parts.map((part) => `${part.id} | ${part.name}`).join('\n');
+  const instructions = `Build one forensic deep-research layer for a vendor-neutral data-center archive. Focus only on: ${layer.focus}.
+
+Return 24–36 distinct, physically or operationally identifiable components at the lowest level that public documentation can support. Work from the facility boundary toward subassemblies, board-level devices, materials, firmware, protocols, and licensed IP where relevant. Do not pad the list, repeat synonyms, or simply rename the overview records supplied below. A component may be a documented alternative architecture, but the description must say so. This is a generic reference architecture: never imply that all alternatives coexist in one facility.
+
+Prioritize standards, public utility and government material, Open Compute Project specifications, first-party engineering manuals and product documentation, regulatory or exchange filings, credible teardowns, and strong technical publications. Every component must cite a consulted HTTPS source. Preserve meaningful power, data, thermal, fluid, mechanical, structural, and control connections among ids returned in this layer.
+
+Capture readily established component suppliers and IP roles, including multiple current, former, alternative, regional, and credibly reported or rumored relationships when sources support them. Keep manufacturer, assembler, designer, foundry, packaging/test, material, software, protocol, and IP roles distinct. Generic-category vendors are representative offerings, never site-deployment claims. A dedicated six-component supplier audit follows, so spend most of this pass on complete technical decomposition.
+
+Return a concise accuracy boundary and an image prompt, although this archive-deepening pass will reuse the canonical overview images. Do not provide construction procedures, hazardous electrical instructions, or operating setpoints.`;
+  report({ stage: 'research', message: `Deep archive layer · ${layer.label} — decomposing documented subassemblies…` });
+  const payload = await generateResearchWithFallback(connection, {
+    model: connection.researchModel,
+    reasoning: { effort: 'low' },
+    instructions,
+    input: `Canonical subject: a data center\nDeep layer: ${layer.label}\n\nExisting archive records to avoid duplicating:\n${existingNames}`,
+    tools: [{ type: 'web_search', search_context_size: 'medium' }],
+    text: { format: { type: 'json_schema', name: `data_center_${layer.id.replaceAll('-', '_')}`, strict: true, schema: atlasSchema } },
+  }, report, { stage: 'research', message: `${layer.label} deep research is still running` });
+  const raw = JSON.parse(extractOutputText(payload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
+  const normalized = normalizeAtlas(raw);
+  const layered = {
+    ...normalized,
+    subject: 'Data center',
+    parts: normalized.parts.map((part) => ({ ...part, archiveLayer: layer.label })),
+    mode: 'generated' as const,
+    generatedAt: new Date().toISOString(),
+  };
+  report({ stage: 'inventory', message: `${layer.label} layer mapped ${layered.parts.length} lower-level components.` });
+  // Terra was exceptionally strong for generic market alternatives in the
+  // overview audit; reserve Astra for opaque named-product supply chains.
+  const genericSupplierConnection = { ...connection, supplierResearchModel: connection.researchModel };
+  const enriched = await enrichSuppliers(genericSupplierConnection, layered, report);
+  return { ...enriched, mode: 'generated', generatedAt: layered.generatedAt } satisfies FoundryAtlas;
+}
+
+async function deepenDataCenterArchive(
+  connection: AiConnection,
+  existing: FoundryAtlas,
+  report: ProgressReporter,
+) {
+  report({ stage: 'research', message: `Expanding the canonical data-center archive across ${dataCenterDeepLayers.length} independent technical layers…` });
+  const settled = await Promise.allSettled(dataCenterDeepLayers.map(async (layer) => ({
+    layer,
+    atlas: await researchDataCenterLayer(connection, layer, existing, report),
+  })));
+  const additions = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+  for (const result of settled) if (result.status === 'rejected') console.warn('Data-center deep layer failed', result.reason);
+  if (!additions.length) throw new Error('Every data-center archive deepening pass was unavailable.');
+  if (additions.length !== dataCenterDeepLayers.length) {
+    report({ stage: 'research', message: `${additions.length}/${dataCenterDeepLayers.length} data-center deep layers completed; preserving successful layers for the archive.` });
+  }
+  const merged = mergeDataCenterLayers(existing, additions);
+  report({
+    stage: 'inventory',
+    message: `Canonical data-center archive now contains ${merged.parts.length} components across ${merged.archive?.layers.length ?? 1} explorable levels.`,
+  });
+  report({ stage: 'save', message: 'Saving every completed layer under the canonical data-center archive…' });
+  const saved = await saveAtlasToGallery(merged, 'data center');
+  report({ stage: 'done', message: 'Multilevel data-center archive complete; all common prompt aliases now reopen this record.' });
+  return saved;
+}
+
 async function generateImage(
   connection: AiConnection,
   subject: string,
@@ -564,8 +766,8 @@ async function generateImage(
     : 'Wide landscape technical plate, with the complete object and every separated assembly comfortably inside the frame.';
   const sharedDirection = `Photorealistic premium 3D product visualization of ${subject}. ${visualPrompt} ${formatDirection} Canonical three-quarter view, deep charcoal and limestone museum studio, restrained graphite palette, realistic materials, precise soft key light and crisp rim lighting, high contrast with readable shadow detail. No people, no text, no labels, no arrows, no logos, no watermark, no workshop clutter. Educational conceptual visualization, not an engineering drawing or service guide.`;
   const modeDirection = mode === 'assembled'
-    ? 'Show one complete, fully assembled object centered and intact. No cutaway, no exposed internals, and no floating or duplicated parts. Leave generous dark negative space around the silhouette.'
-    : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. Keep the recognizable main shell or enclosing structure central. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
+    ? 'CRITICAL COMPOSITION RULE: show exactly one complete, fully assembled object, large and centered. No second reference copy, comparison panel, exploded layout, cutaway, exposed internals, floating pieces, duplicated product, inset, or side-by-side composition. The intact object should occupy most of the frame while remaining fully visible.'
+    : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. CRITICAL COMPOSITION RULE: depict exactly one product disassembled into its parts. Do not add an intact reference copy, second product, comparison view, inset, duplicated screen, or side-by-side assembled object. Keep the recognizable main shell or enclosing structure central. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
   const response = await undiciFetch(`${connection.baseUrl}/images/generations`, {
     dispatcher: aiDispatcher,
     method: 'POST',
@@ -668,6 +870,8 @@ export async function POST(request: Request) {
           headers: {
             'Content-Type': 'application/json',
             Accept: request.headers.get('accept') ?? 'application/json',
+            ...(request.headers.get('x-atlas-force-refresh') === '1' ? { 'X-Atlas-Force-Refresh': '1' } : {}),
+            ...(request.headers.get('x-atlas-deep-build') === '1' ? { 'X-Atlas-Deep-Build': '1' } : {}),
           },
           body: JSON.stringify({ prompt }),
           cache: 'no-store',
@@ -687,8 +891,11 @@ export async function POST(request: Request) {
 
   const run = async (report: ProgressReporter): Promise<Response> => {
   report({ stage: 'cache', message: 'Checking the shared gallery for a finished atlas…' });
-  const cachedAtlas = await loadCachedAtlas(cacheKeyForPrompt(prompt));
-  if (cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
+  const promptCacheKey = cacheKeyForPrompt(prompt);
+  const cachedAtlas = await loadCachedAtlas(promptCacheKey);
+  const forceRefresh = request.headers.get('x-atlas-force-refresh') === '1';
+  const deepDataCenterBuild = request.headers.get('x-atlas-deep-build') === '1' && promptCacheKey === 'data-center';
+  if (!forceRefresh && !deepDataCenterBuild && cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
     report({ stage: 'done', message: `Found ${cachedAtlas.subject} in the shared gallery.` });
     return NextResponse.json({ atlas: cachedAtlas, cached: true });
   }
@@ -710,6 +917,26 @@ export async function POST(request: Request) {
   }
   recent.push(now);
   requestWindows.set(clientId, recent);
+
+  if (deepDataCenterBuild) {
+    if (!cachedAtlas || cachedAtlas.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION) {
+      return NextResponse.json({ error: 'Build the current data-center overview before requesting deep archive layers.' }, { status: 409 });
+    }
+    try {
+      const atlas = await deepenDataCenterArchive(connection, cachedAtlas, report);
+      return NextResponse.json({
+        atlas,
+        cached: false,
+        deepened: true,
+        researchModel: connection.researchModel,
+        supplierResearchModel: connection.researchModel,
+        imageModel: connection.imageModel,
+      });
+    } catch (error) {
+      console.error('Data-center archive deepening failed', error);
+      return NextResponse.json({ error: 'The data-center overview is safe, but the deep archive passes could not be completed. Please retry later.' }, { status: 500 });
+    }
+  }
 
   const instructions = `You create careful, unusually detailed educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals and product pages, museums, universities, government sources, standards bodies, regulatory filings, SEC or exchange filings, and strong technical references.
 
@@ -811,6 +1038,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       imageWarning,
       cacheWarning,
       researchModel: connection.researchModel,
+      supplierResearchModel: connection.supplierResearchModel,
       imageModel: connection.imageModel,
     });
   } catch (error) {

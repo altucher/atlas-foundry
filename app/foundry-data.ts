@@ -46,7 +46,22 @@ export type AtlasPart = {
   confidence: 'high' | 'medium' | 'contextual';
   suppliers?: AtlasSupplier[];
   supplierResearch?: AtlasSupplierResearch;
+  archiveLayer?: string;
   connections?: AtlasConnection[];
+};
+
+export type AtlasArchiveLayer = {
+  id: string;
+  label: string;
+  focus: string;
+  partCount: number;
+  generatedAt: string;
+};
+
+export type AtlasArchive = {
+  canonicalKey: string;
+  aliases: string[];
+  layers: AtlasArchiveLayer[];
 };
 
 export type AtlasHotspot = {
@@ -74,6 +89,7 @@ export type FoundryAtlas = {
   hotspots?: Record<string, AtlasHotspot | AtlasHotspot[]>;
   mode: 'curated' | 'generated' | 'authoritative-3d';
   generatedAt?: string;
+  archive?: AtlasArchive;
 };
 
 export type AtlasGalleryItem = {

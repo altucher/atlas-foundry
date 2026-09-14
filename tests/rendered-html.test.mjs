@@ -26,7 +26,7 @@ test("server-renders the Atlas Foundry workbench", async () => {
   assert.match(html, /VENDORS/);
   assert.match(html, /EXPLOSION/);
   assert.match(html, /Cross-generation platform/);
-  assert.match(html, /SUPPLIERS \/ VENDORS/);
+  assert.match(html, /Move the explosion slider/);
   assert.doesNotMatch(html, /Know what this is/i);
   assert.doesNotMatch(html, /Conceptual by default/i);
 });
@@ -55,6 +55,12 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /responses\/\$\{encodeURIComponent\(responseId\)\}/);
   assert.match(generationRoute, /gpt-5\.6-terra/);
   assert.match(generationRoute, /gpt-5\.6-luna/);
+  assert.match(generationRoute, /defaultSupplierResearchModel = 'gpt-6-astra'/);
+  assert.match(generationRoute, /do not return the product's own brand as an integrator/);
+  assert.match(generationRoute, /x-atlas-force-refresh/);
+  assert.match(generationRoute, /x-atlas-deep-build/);
+  assert.match(generationRoute, /dataCenterDeepLayers/);
+  assert.match(generationRoute, /Canonical data-center archive now contains/);
   assert.match(generationRoute, /retrying automatically/);
   assert.match(generationRoute, /forensic component-supply-chain researcher/);
   assert.match(generationRoute, /Supplier evidence pass/);
@@ -65,10 +71,12 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(store, /@vercel\/blob/);
   assert.match(store, /cacheKeyForPrompt/);
   assert.match(store, /CURRENT_INTELLIGENCE_VERSION/);
+  assert.match(store, /normalized === 'data-center' \|\| normalized === 'data-centers'/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /foundry-build-journal/);
   assert.match(page, /COMPONENT AUDIT/);
   assert.match(page, /Open evidence for/);
+  assert.match(page, /RESEARCH LAYERS/);
   assert.match(page, /RESEARCH REFRESH/);
   assert.match(page, /foundry-connection-lines/);
 });

@@ -92,7 +92,8 @@ export default function FoundryHome() {
   const [prompt, setPrompt] = useState('Tesla');
   const [atlas, setAtlas] = useState<FoundryAtlas>(TESLA_DEMO);
   const [explode, setExplode] = useState(0);
-  const [selectedId, setSelectedId] = useState(TESLA_DEMO.parts[0].id);
+  const [selectedId, setSelectedId] = useState('');
+  const [activeLayer, setActiveLayer] = useState('All layers');
   const [activeSystem, setActiveSystem] = useState('All systems');
   const [partQuery, setPartQuery] = useState('');
   const [activeVendor, setActiveVendor] = useState<string | null>(null);
@@ -104,7 +105,11 @@ export default function FoundryHome() {
   const [buildJournal, setBuildJournal] = useState<BuildJournalEntry[]>([]);
   const [notice, setNotice] = useState('');
 
-  const systems = useMemo(() => ['All systems', ...Array.from(new Set(atlas.parts.map((part) => part.system)))], [atlas]);
+  const archiveLayers = useMemo(() => atlas.archive?.layers.map((layer) => layer.label) ?? [], [atlas.archive]);
+  const systems = useMemo(() => {
+    const inLayer = activeLayer === 'All layers' ? atlas.parts : atlas.parts.filter((part) => (part.archiveLayer ?? 'Overview') === activeLayer);
+    return ['All systems', ...Array.from(new Set(inLayer.map((part) => part.system)))];
+  }, [activeLayer, atlas.parts]);
   const vendors = useMemo(() => {
     const entries = new Map<string, VendorEntry>();
     for (const part of atlas.parts) {
@@ -121,15 +126,16 @@ export default function FoundryHome() {
   const visibleParts = useMemo(() => {
     const term = partQuery.trim().toLowerCase();
     return atlas.parts.filter((part) => {
+      const inLayer = activeLayer === 'All layers' || (part.archiveLayer ?? 'Overview') === activeLayer;
       const inSystem = activeSystem === 'All systems' || part.system === activeSystem;
       const inVendor = !activeVendor || (part.suppliers ?? []).some((supplier) => supplier.company === activeVendor);
       const supplierTerms = (part.suppliers ?? []).map((supplier) => `${supplier.company} ${supplier.ticker ?? ''} ${supplier.role ?? ''} ${supplier.relationshipStatus} ${supplier.note}`).join(' ');
       const connectionTerms = (part.connections ?? []).map((connection) => `${connection.relationship} ${connection.description} ${connection.toPartId}`).join(' ');
       const matches = !term || `${part.name} ${part.system} ${part.sourceId} ${supplierTerms} ${connectionTerms}`.toLowerCase().includes(term);
-      return inSystem && inVendor && matches;
+      return inLayer && inSystem && inVendor && matches;
     });
-  }, [activeSystem, activeVendor, atlas.parts, partQuery]);
-  const selectedPart = atlas.parts.find((part) => part.id === selectedId) ?? visibleParts[0] ?? atlas.parts[0];
+  }, [activeLayer, activeSystem, activeVendor, atlas.parts, partQuery]);
+  const selectedPart = atlas.parts.find((part) => part.id === selectedId);
   const auditedPartCount = atlas.parts.filter((part) => part.supplierResearch && part.supplierResearch.status !== 'incomplete').length;
   const sourcedPartCount = atlas.parts.filter((part) => part.suppliers?.length).length;
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
@@ -137,8 +143,8 @@ export default function FoundryHome() {
     const part = atlas.parts.find((candidate) => candidate.id === connection.toPartId);
     return part ? [{ connection, part }] : [];
   });
-  const hasIllustratedExplosion = Boolean(atlas.explodedImage);
-  const showingEveryPart = visibleParts.length === atlas.parts.length;
+  const hasIllustratedExplosion = Boolean(atlas.explodedImage) && (!atlas.archive || activeLayer === 'Overview');
+  const showingEveryPart = visibleParts.every((part) => (part.archiveLayer ?? 'Overview') === 'Overview');
   const supplierCount = vendors.length;
 
   async function refreshGallery() {
@@ -164,10 +170,12 @@ export default function FoundryHome() {
   function loadAtlas(nextAtlas: FoundryAtlas, message: string) {
     setAtlas(nextAtlas);
     setExplode(0);
+    const initialLayer = nextAtlas.archive?.layers.find((layer) => layer.id === 'overview')?.label ?? 'All layers';
+    setActiveLayer(initialLayer);
     setActiveSystem('All systems');
     setActiveVendor(null);
     setPartQuery('');
-    setSelectedId(nextAtlas.parts[0]?.id ?? '');
+    setSelectedId('');
     setNotice(message);
   }
 
@@ -261,6 +269,7 @@ export default function FoundryHome() {
   function chooseVendor(vendor: VendorEntry) {
     const nextVendor = activeVendor === vendor.company ? null : vendor.company;
     setActiveVendor(nextVendor);
+    setActiveLayer('All layers');
     setActiveSystem('All systems');
     setPartQuery('');
     if (nextVendor) {
@@ -361,9 +370,29 @@ export default function FoundryHome() {
             <Search />
             <Input value={partQuery} onChange={(event) => setPartQuery(event.target.value)} placeholder="Find a component" />
           </label>
+          {archiveLayers.length ? (
+            <div className="foundry-layer-index">
+              <span>RESEARCH LAYERS</span>
+              {archiveLayers.map((layer) => {
+                const count = atlas.parts.filter((part) => (part.archiveLayer ?? 'Overview') === layer).length;
+                return (
+                  <button type="button" key={layer} className={activeLayer === layer && !activeVendor ? 'active' : ''} onClick={() => {
+                    setActiveLayer(layer);
+                    setActiveSystem('All systems');
+                    setActiveVendor(null);
+                    setPartQuery('');
+                    setSelectedId(atlas.parts.find((part) => (part.archiveLayer ?? 'Overview') === layer)?.id ?? '');
+                  }}>
+                    <span>{layer}</span><small>{String(count).padStart(2, '0')}</small>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <div className="foundry-system-list">
             {systems.map((system) => {
-              const count = system === 'All systems' ? atlas.parts.length : atlas.parts.filter((part) => part.system === system).length;
+              const layerParts = activeLayer === 'All layers' ? atlas.parts : atlas.parts.filter((part) => (part.archiveLayer ?? 'Overview') === activeLayer);
+              const count = system === 'All systems' ? layerParts.length : layerParts.filter((part) => part.system === system).length;
               return (
                 <button type="button" key={system} className={activeSystem === system && !activeVendor ? 'active' : ''} onClick={() => { setActiveSystem(system); setActiveVendor(null); }}>
                   <span>{system}</span><small>{String(count).padStart(2, '0')}</small>
@@ -415,7 +444,7 @@ export default function FoundryHome() {
           <div
             className={`foundry-assembly${hasIllustratedExplosion ? ' rich-assembled' : ''}${atlas.imageOrientation === 'portrait' ? ' portrait' : ''}`}
             style={{
-              opacity: hasIllustratedExplosion ? Math.max(0, 1 - explode * 1.45) : Math.max(0.12, 1 - explode * 0.9),
+              opacity: hasIllustratedExplosion ? Math.max(0, Math.min(1, 1 - (explode - 0.12) / 0.68)) : Math.max(0.12, 1 - explode * 0.9),
               transform: `translate(-50%, -50%) scale(${1 - explode * (hasIllustratedExplosion ? 0.06 : 0.16)})`,
             }}
           >
@@ -475,7 +504,7 @@ export default function FoundryHome() {
                         className={`foundry-part-layer${active ? ' active' : ''}`}
                         style={{
                           clipPath: `inset(${top}% ${right}% ${bottom}% ${left}% round 4%)`,
-                          opacity: Math.max(0, Math.min(1, (explode - 0.03) * 1.85)),
+                          opacity: Math.max(0, Math.min(1, (explode - 0.18) / 0.68)),
                           transform: `translate(${shiftX}%, ${shiftY}%) scale(${0.48 + explode * 0.52})`,
                           transformOrigin: `${region.x}% ${region.y}%`,
                         }}
@@ -596,7 +625,7 @@ export default function FoundryHome() {
                 <div className="foundry-connections-list">
                   <span>CONNECTIONS / POWER · DATA · THERMAL · PHYSICAL</span>
                   {selectedConnections.map(({ connection, part }) => (
-                    <button type="button" key={`${connection.toPartId}-${connection.relationship}`} onClick={() => { setSelectedId(part.id); setActiveSystem('All systems'); setActiveVendor(null); setPartQuery(''); setExplode((amount) => Math.max(amount, 0.72)); }}>
+                    <button type="button" key={`${connection.toPartId}-${connection.relationship}`} onClick={() => { setSelectedId(part.id); setActiveLayer(part.archiveLayer ?? 'Overview'); setActiveSystem('All systems'); setActiveVendor(null); setPartQuery(''); setExplode((amount) => Math.max(amount, 0.72)); }}>
                       <i className={`connection-${connection.relationship}`}>{connection.relationship}</i>
                       <span><strong>{part.name}</strong><small>{connection.description}</small></span>
                       <ChevronRight />
@@ -613,7 +642,19 @@ export default function FoundryHome() {
                 )) : <p>See the full source register below.</p>}
               </div>
             </>
-          ) : <p>Select a component to inspect its record.</p>}
+          ) : (
+            <div className="foundry-object-overview">
+              <div className="detail-index-row"><span /><small>{atlas.category}</small><code>{atlas.mode === 'generated' ? 'RESEARCH ATLAS' : 'CURATED ATLAS'}</code></div>
+              <h2>{atlas.subject}</h2>
+              <p>{atlas.summary}</p>
+              <dl>
+                <div><dt>Components</dt><dd>{atlas.parts.length}</dd></div>
+                <div><dt>Vendors</dt><dd>{supplierCount || 'Researching'}</dd></div>
+              </dl>
+              {atlas.archive ? <p className="overview-archive-note">MULTILEVEL ARCHIVE · {atlas.archive.layers.length} RESEARCH LAYERS</p> : null}
+              <p className="overview-instruction">Move the explosion slider, then click any numbered component to open its evidence, suppliers, IP roles, connections, and sources.</p>
+            </div>
+          )}
         </aside>
       </section>
 

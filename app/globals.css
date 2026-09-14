@@ -358,6 +358,11 @@ a { color: inherit; }
 .foundry-part-search input { height: 36px; padding: 0; border: 0; background: transparent; box-shadow: none; color: #c7c2b5; font-size: 10px; }
 .foundry-part-search input:focus-visible { outline: 0; box-shadow: none; }
 .foundry-system-list { max-height: 386px; margin: 17px -5px 0; overflow-y: auto; scrollbar-width: none; }
+.foundry-layer-index { display: grid; gap: 2px; max-height: 230px; margin: 14px -5px 0; padding-bottom: 10px; overflow-y: auto; border-bottom: 1px solid var(--foundry-line); scrollbar-width: thin; }
+.foundry-layer-index > span { margin: 0 8px 5px; color: #746b58; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 5px; letter-spacing: .14em; }
+.foundry-layer-index > button { min-height: 30px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 5px 8px; border: 0; border-left: 1px solid transparent; background: transparent; color: #73766e; font-size: 7px; text-align: left; }
+.foundry-layer-index > button:hover, .foundry-layer-index > button.active { border-left-color: #c6b78f; background: linear-gradient(90deg, #c6b78f12, transparent); color: #d7d0c0; }
+.foundry-layer-index small { color: #77705c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; }
 .foundry-system-list button { width: 100%; height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; border: 0; border-left: 1px solid transparent; background: transparent; color: #6f726a; font-size: 9px; text-align: left; }
 .foundry-system-list button:hover { color: #bcb9ad; background: #ffffff06; }
 .foundry-system-list button.active { border-left-color: #c6b78f; background: linear-gradient(90deg, #c6b78f13, transparent); color: #d9d3c6; }
@@ -400,8 +405,8 @@ a { color: inherit; }
 .foundry-stage::after { left: 50%; top: 8%; bottom: 14%; width: 1px; }
 .foundry-assembly { position: absolute; z-index: 2; left: 50%; top: 47%; width: min(75%, 720px); transform: translate(-50%, -50%); transition: opacity .12s linear, transform .12s linear; filter: drop-shadow(0 35px 55px #0009); }
 .foundry-assembly img { display: block; width: 100%; max-height: 470px; object-fit: contain; mix-blend-mode: normal; mask-image: linear-gradient(to bottom, #000 88%, transparent 100%); }
-.foundry-assembly.rich-assembled { width: min(94%, 910px); top: 48%; filter: none; }
-.foundry-assembly.rich-assembled img { max-height: 590px; border: 1px solid #e6dcc819; box-shadow: 0 34px 80px #0008; mask-image: none; }
+.foundry-assembly.rich-assembled { width: min(112%, 1060px); top: 48%; filter: none; }
+.foundry-assembly.rich-assembled img { max-height: 650px; border: 1px solid #e6dcc819; box-shadow: 0 34px 80px #0008; object-fit: cover; mask-image: none; }
 .foundry-assembly.rich-assembled.portrait { width: min(54%, 360px); }
 .foundry-assembly.rich-assembled.portrait img { max-height: 540px; }
 .foundry-visual-fallback { min-height: 330px; display: grid; place-content: center; justify-items: center; gap: 12px; border: 1px solid #e6dcc819; background: radial-gradient(circle, #252720 0, #0d0e0c 70%); color: #6f7269; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; letter-spacing: .14em; }
@@ -413,7 +418,7 @@ a { color: inherit; }
 .axis-y { top: 8%; bottom: 5%; left: 50%; width: 1px; }
 .axis-y::before { left: -2px; top: 0; }.axis-y::after { left: -2px; bottom: 0; }
 .foundry-parts { position: absolute; z-index: 4; inset: 48px 18px 118px; pointer-events: none; }
-.foundry-exploded-visual { position: absolute; z-index: 3; left: 50%; top: 48%; width: min(96%, 940px); aspect-ratio: 3 / 2; transform: translate(-50%, -50%); transition: transform .08s linear; pointer-events: none; }
+.foundry-exploded-visual { position: absolute; z-index: 3; left: 50%; top: 48%; width: min(108%, 1040px); aspect-ratio: 3 / 2; transform: translate(-50%, -50%); transition: transform .08s linear; pointer-events: none; }
 .foundry-exploded-visual.portrait { width: min(54%, 360px); aspect-ratio: 2 / 3; }
 .foundry-exploded-base, .foundry-part-layer img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .foundry-exploded-base { position: absolute; inset: 0; z-index: 0; border: 1px solid #e6dcc819; box-shadow: 0 34px 80px #0008; transition: opacity .08s linear; }
@@ -464,6 +469,10 @@ a { color: inherit; }
 .detail-index-row code { margin-left: auto; color: #5d6059; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; }
 .foundry-detail h2 { margin: 18px 0 14px; color: #ece4d7; font-family: Georgia, "Times New Roman", serif; font-size: 30px; font-weight: 400; letter-spacing: -.04em; line-height: 1.02; }
 .foundry-detail > p { margin: 0; color: #93948a; font-size: 11px; line-height: 1.75; }
+.foundry-object-overview > p { margin: 0; color: #93948a; font-size: 11px; line-height: 1.75; }
+.foundry-object-overview .detail-index-row > span { background: #c6b78f; }
+.foundry-object-overview .overview-archive-note { margin-top: 14px; color: #b7a979; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .12em; }
+.foundry-object-overview .overview-instruction { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--foundry-line); color: #73766e; font-size: 8px; }
 .foundry-detail dl { display: grid; grid-template-columns: 1fr 1fr; margin: 25px 0 0; padding: 16px 0; border-block: 1px solid var(--foundry-line); }
 .foundry-detail dl div + div { padding-left: 16px; border-left: 1px solid var(--foundry-line); }
 .foundry-detail dt { color: #5e6159; font-size: 7px; letter-spacing: .13em; text-transform: uppercase; }
@@ -566,6 +575,10 @@ a { color: inherit; }
   .foundry-index { border-right: 0; border-bottom: 1px solid var(--foundry-line); }
   .foundry-subject { margin: 23px 0 17px; }
   .foundry-system-list { display: flex; margin: 14px -2px 0; overflow-x: auto; }
+  .foundry-layer-index { display: flex; max-height: none; margin: 12px -2px 0; padding-bottom: 6px; overflow-x: auto; border-bottom: 1px solid var(--foundry-line); }
+  .foundry-layer-index > span { display: none; }
+  .foundry-layer-index > button { min-width: max-content; border-left: 0; border-bottom: 1px solid transparent; }
+  .foundry-layer-index > button.active { border-bottom-color: #c6b78f; }
   .foundry-system-list button { width: auto; min-width: max-content; padding-inline: 10px; border-left: 0; border-bottom: 1px solid transparent; }
   .foundry-system-list button.active { border-bottom-color: #c6b78f; background: linear-gradient(0deg, #c6b78f13, transparent); }
   .foundry-vendor-index { margin-top: 13px; padding-top: 12px; }
