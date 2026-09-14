@@ -381,7 +381,9 @@ a { color: inherit; }
 .foundry-hotspot { --part-color: #b9aa89; position: absolute; min-width: 32px; min-height: 32px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--part-color); transform: translate(-50%, -50%); pointer-events: auto; cursor: crosshair; transition: border-color .16s, background .16s, box-shadow .16s; }
 .foundry-hotspot::after { content: ""; position: absolute; inset: 0; border: 1px dashed color-mix(in srgb, var(--part-color), transparent 40%); border-radius: inherit; opacity: 0; transition: opacity .16s; }
 .foundry-hotspot > i { position: absolute; left: 50%; top: 50%; width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--part-color), #fff 35%); border-radius: 50%; background: #0c0d0be8; box-shadow: 0 0 0 4px #0809078c, 0 7px 18px #000b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; font-style: normal; transform: translate(-50%, -50%); }
-.foundry-hotspot > span { position: absolute; left: 50%; bottom: calc(50% + 21px); width: max-content; max-width: 132px; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--part-color), transparent 64%); background: #0b0c0af2; box-shadow: 0 10px 25px #0009; color: #e7dfd1; font-size: 8px; line-height: 1.2; opacity: 0; transform: translate(-50%, 4px); pointer-events: none; transition: opacity .16s, transform .16s; }
+.foundry-hotspot > span { position: absolute; left: 50%; bottom: calc(50% + 21px); width: max-content; max-width: 150px; display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--part-color), transparent 64%); background: #0b0c0af2; box-shadow: 0 10px 25px #0009; color: #e7dfd1; font-size: 8px; line-height: 1.2; opacity: 0; transform: translate(-50%, 4px); pointer-events: none; transition: opacity .16s, transform .16s; }
+.foundry-hotspot > span strong { font-weight: 500; }
+.foundry-hotspot > span small { color: #b9a776; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .04em; text-transform: uppercase; }
 .foundry-hotspot:hover, .foundry-hotspot:focus-visible, .foundry-hotspot.active { z-index: 3; border-color: color-mix(in srgb, var(--part-color), transparent 42%); background: color-mix(in srgb, var(--part-color), transparent 91%); box-shadow: inset 0 0 28px color-mix(in srgb, var(--part-color), transparent 86%), 0 0 24px #0007; outline: none; }
 .foundry-hotspot:hover::after, .foundry-hotspot:focus-visible::after, .foundry-hotspot.active::after { opacity: 1; }
 .foundry-hotspot:hover > i, .foundry-hotspot:focus-visible > i, .foundry-hotspot.active > i { background: color-mix(in srgb, var(--part-color), #0b0c0a 73%); box-shadow: 0 0 0 5px #080907b0, 0 0 26px color-mix(in srgb, var(--part-color), transparent 48%); }
@@ -416,6 +418,14 @@ a { color: inherit; }
 .foundry-detail dl div + div { padding-left: 16px; border-left: 1px solid var(--foundry-line); }
 .foundry-detail dt { color: #5e6159; font-size: 7px; letter-spacing: .13em; text-transform: uppercase; }
 .foundry-detail dd { margin: 6px 0 0; color: #b3b0a5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; text-transform: uppercase; }
+.foundry-vendor { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; margin-top: 18px; padding: 13px; border: 1px solid #c4ad7240; background: linear-gradient(135deg, #302819a6, #15150f99); }
+.foundry-vendor > span { grid-column: 1 / -1; color: #8d8062; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .16em; }
+.foundry-vendor > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.foundry-vendor strong { overflow: hidden; color: #ddd3bd; font-size: 9px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.foundry-vendor small { color: #777366; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; text-transform: uppercase; }
+.foundry-vendor a { display: flex; align-items: center; gap: 6px; color: #cbb784; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .08em; text-decoration: none; }
+.foundry-vendor a:hover { color: #f0dfb1; }
+.foundry-vendor a svg { width: 10px; }
 .foundry-citations { margin-top: 23px; }
 .foundry-citations > span { color: #60635b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; letter-spacing: .16em; }
 .foundry-citations > a { min-height: 47px; display: flex; align-items: center; gap: 10px; margin-top: 9px; padding: 8px 0; border-bottom: 1px solid var(--foundry-line); color: #a7a69b; text-decoration: none; }

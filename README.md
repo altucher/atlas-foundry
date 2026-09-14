@@ -39,7 +39,7 @@ npm run build
 
 ## Product modes
 
-- **Generated atlas:** web research with cited first-party or authoritative sources, 6–14 major component records, a high-quality photorealistic assembled/exploded image pair, independently animated visual component layers, full-component click regions, system filters, component search, and continuous explosion control.
+- **Generated atlas:** web research with cited first-party or authoritative sources, 6–14 major component records, a high-quality photorealistic assembled/exploded image pair, independently animated visual component layers, full-component click regions, system filters, component search, continuous explosion control, and source-backed public-company vendor/ticker labels with Yahoo Finance links.
 - **Curated demo:** a ready-to-show Tesla electric-vehicle systems overview with paired assembled/exploded studio illustrations and twelve clickable component regions. It is explicitly conceptual and varies by model/year/trim; the hotspots are a visual index, not service geometry.
 - **Verified 3D edition:** the `/human` route uses identity-preserving BodyParts3D source meshes, GPU per-part transforms, geometric picking, and true visible-only exploded packing.
 
@@ -66,7 +66,7 @@ public/ATTRIBUTION.md         Anatomy data license and adaptation details
 
 `POST /api/generate-atlas` accepts `{ "prompt": "…" }` and performs two server-side operations:
 
-1. The OpenAI Responses API researches the public web and returns a strict component-atlas schema with supporting HTTPS sources.
+1. The OpenAI Responses API researches the public web and returns a strict component-atlas schema with supporting HTTPS sources. For engineered products, supplier names and public-company tickers are included only when the component relationship and listing are supported; Yahoo Finance URLs are derived server-side from the verified symbol.
 2. The Images API renders matched high-quality assembled and exploded studio views in parallel.
 3. A vision pass locates each researched part in the exploded image and attaches its source-backed record to a clickable hotspot. If visual generation or localization fails, the researched catalog still returns with a deterministic non-overlapping inventory fallback.
 

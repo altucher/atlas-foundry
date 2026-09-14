@@ -80,12 +80,29 @@ const atlasSchema = {
       type: 'array', minItems: 6, maxItems: 14,
       items: {
         type: 'object', additionalProperties: false,
-        required: ['id', 'name', 'system', 'description', 'sourceId', 'color', 'sourceUrls', 'confidence'],
+        required: ['id', 'name', 'system', 'description', 'sourceId', 'color', 'sourceUrls', 'confidence', 'vendor'],
         properties: {
           id: { type: 'string' }, name: { type: 'string' }, system: { type: 'string' },
           description: { type: 'string' }, sourceId: { type: 'string' }, color: { type: 'string' },
           sourceUrls: { type: 'array', items: { type: 'string' }, maxItems: 4 },
           confidence: { type: 'string', enum: ['high', 'medium', 'contextual'] },
+          vendor: {
+            anyOf: [
+              {
+                type: 'object',
+                additionalProperties: false,
+                required: ['company', 'ticker', 'exchange', 'yahooSymbol', 'evidenceUrl'],
+                properties: {
+                  company: { type: 'string' },
+                  ticker: { type: 'string' },
+                  exchange: { type: 'string' },
+                  yahooSymbol: { type: 'string' },
+                  evidenceUrl: { type: 'string' },
+                },
+              },
+              { type: 'null' },
+            ],
+          },
         },
       },
     },
@@ -123,16 +140,39 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
     }))
     .filter((source) => source.url);
   const knownUrls = new Set(sources.map((source) => source.url));
-  const parts: AtlasPart[] = raw.parts.slice(0, 14).map((part, index) => ({
-    ...part,
-    id: part.id.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80) || `part-${index + 1}`,
-    name: part.name.slice(0, 80),
-    system: part.system.slice(0, 48),
-    description: part.description.slice(0, 420),
-    sourceId: part.sourceId.slice(0, 100),
-    color: /^#[0-9a-fA-F]{6}$/.test(part.color) ? part.color : '#b9aa89',
-    sourceUrls: part.sourceUrls.map(safeUrl).filter((url) => knownUrls.has(url)),
-  }));
+  const parts: AtlasPart[] = raw.parts.slice(0, 14).map((part, index) => {
+    const evidenceUrl = part.vendor ? safeUrl(part.vendor.evidenceUrl) : '';
+    const yahooSymbol = part.vendor?.yahooSymbol?.trim().slice(0, 24) ?? '';
+    const vendor = part.vendor
+      && evidenceUrl
+      && knownUrls.has(evidenceUrl)
+      && /^[A-Za-z0-9.^=-]{1,24}$/.test(yahooSymbol)
+      && part.vendor.company.trim()
+      && part.vendor.ticker.trim()
+      && part.vendor.exchange.trim()
+      ? {
+          company: part.vendor.company.trim().slice(0, 100),
+          ticker: part.vendor.ticker.trim().slice(0, 24),
+          exchange: part.vendor.exchange.trim().slice(0, 40),
+          yahooSymbol,
+          evidenceUrl,
+          financeUrl: `https://finance.yahoo.com/quote/${encodeURIComponent(yahooSymbol)}/`,
+        }
+      : undefined;
+    const sourceUrls = part.sourceUrls.map(safeUrl).filter((url) => knownUrls.has(url));
+    if (vendor && !sourceUrls.includes(vendor.evidenceUrl)) sourceUrls.push(vendor.evidenceUrl);
+    return {
+      ...part,
+      id: part.id.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80) || `part-${index + 1}`,
+      name: part.name.slice(0, 80),
+      system: part.system.slice(0, 48),
+      description: part.description.slice(0, 420),
+      sourceId: part.sourceId.slice(0, 100),
+      color: /^#[0-9a-fA-F]{6}$/.test(part.color) ? part.color : '#b9aa89',
+      sourceUrls: sourceUrls.slice(0, 4),
+      vendor,
+    };
+  });
   return { ...raw, sources, parts };
 }
 
@@ -273,7 +313,11 @@ export async function POST(request: Request) {
   recent.push(now);
   requestWindows.set(clientId, recent);
 
-  const instructions = `You create careful educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals, museums, universities, government sources, standards bodies, and strong technical references. Identify 6–14 meaningful, physically distinct parts or major systems that a general learner can understand. Never invent proprietary internals, exact geometry, hidden components, or identifiers. When documentation does not support a claim, mark it contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one of the returned source URLs when possible. The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, or exhaustive dataset.`;
+  const instructions = `You create careful educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals, museums, universities, government sources, standards bodies, SEC or exchange filings, and strong technical references. Identify 6–14 meaningful, physically distinct parts or major systems that a general learner can understand. Never invent proprietary internals, exact geometry, hidden components, identifiers, suppliers, or stock listings. When documentation does not support a claim, mark it contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one of the returned source URLs when possible.
+
+For an engineered product, set vendor only when reliable public evidence identifies the company that manufactures or supplies that specific component and current exchange or investor-relations evidence confirms that company is publicly traded. Set vendor to null for private companies, the product brand alone, rumors, teardown speculation, model/trim ambiguity, or uncertain supplier relationships. Do not treat the product's brand owner as a component vendor unless it actually manufactures that named component. The vendor evidenceUrl must exactly match one URL in sources that supports the component-supplier relationship, and part.sourceUrls must include it. ticker is the exchange ticker; yahooSymbol is the exact symbol Yahoo Finance uses, including market suffixes such as .T, .DE, or .KS when applicable.
+
+The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, exhaustive dataset, or investment recommendation.`;
 
   try {
     const researchResponse = await fetch(`${connection.baseUrl}/responses`, {

@@ -67,7 +67,7 @@ export default function FoundryHome() {
     const term = partQuery.trim().toLowerCase();
     return atlas.parts.filter((part) => {
       const inSystem = activeSystem === 'All systems' || part.system === activeSystem;
-      const matches = !term || `${part.name} ${part.system} ${part.sourceId}`.toLowerCase().includes(term);
+      const matches = !term || `${part.name} ${part.system} ${part.sourceId} ${part.vendor?.company ?? ''} ${part.vendor?.ticker ?? ''}`.toLowerCase().includes(term);
       return inSystem && matches;
     });
   }, [activeSystem, atlas.parts, partQuery]);
@@ -75,6 +75,7 @@ export default function FoundryHome() {
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
   const hasIllustratedExplosion = Boolean(atlas.explodedImage);
   const showingEveryPart = visibleParts.length === atlas.parts.length;
+  const vendorCount = atlas.parts.filter((part) => part.vendor).length;
 
   useEffect(() => {
     if (!visibleParts.some((part) => part.id === selectedId) && visibleParts[0]) setSelectedId(visibleParts[0].id);
@@ -186,7 +187,7 @@ export default function FoundryHome() {
           </div>
           <div className="foundry-mode">
             <i className={atlas.mode === 'generated' ? 'generated' : ''} />
-            <span><strong>{atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} documented systems</small></span>
+            <span><strong>{atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} systems{vendorCount ? ` · ${vendorCount} public vendors` : ''}</small></span>
           </div>
         </aside>
 
@@ -273,11 +274,11 @@ export default function FoundryHome() {
                       } as CSSProperties}
                       disabled={explode < 0.12}
                       onClick={() => setSelectedId(part.id)}
-                      aria-label={`Select ${part.name}`}
+                      aria-label={`Select ${part.name}${part.vendor ? `, supplied by ${part.vendor.company}` : ''}`}
                       aria-pressed={active}
                     >
                       <i>{String(partIndex + 1).padStart(2, '0')}</i>
-                      <span>{part.name}</span>
+                      <span><strong>{part.name}</strong>{part.vendor && <small>{part.vendor.company} · {part.vendor.ticker}</small>}</span>
                     </button>
                   ));
                 })}
@@ -300,7 +301,7 @@ export default function FoundryHome() {
                   onClick={() => setSelectedId(part.id)}
                 >
                   <i>{String(index + 1).padStart(2, '0')}</i>
-                  <span><strong>{part.name}</strong><small>{part.system}</small></span>
+                  <span><strong>{part.name}</strong><small>{part.vendor ? `${part.vendor.company} · ${part.vendor.ticker}` : part.system}</small></span>
                 </button>
               );
             })}
@@ -324,6 +325,15 @@ export default function FoundryHome() {
                 <div><dt>Evidence</dt><dd>{selectedPart.confidence}</dd></div>
                 <div><dt>References</dt><dd>{selectedSources.length || 'Catalog'}</dd></div>
               </dl>
+              {selectedPart.vendor && (
+                <div className="foundry-vendor">
+                  <span>PUBLIC COMPANY VENDOR</span>
+                  <div><strong>{selectedPart.vendor.company}</strong><small>{selectedPart.vendor.exchange} · {selectedPart.vendor.ticker}</small></div>
+                  <a href={selectedPart.vendor.financeUrl} target="_blank" rel="noreferrer" aria-label={`View ${selectedPart.vendor.company} on Yahoo Finance`}>
+                    YAHOO FINANCE <ExternalLink />
+                  </a>
+                </div>
+              )}
               <div className="foundry-citations">
                 <span>SUPPORTING SOURCES</span>
                 {selectedSources.length ? selectedSources.map((source) => (

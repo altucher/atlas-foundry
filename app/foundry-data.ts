@@ -5,6 +5,15 @@ export type AtlasSource = {
   url: string;
 };
 
+export type AtlasVendor = {
+  company: string;
+  ticker: string;
+  exchange: string;
+  yahooSymbol: string;
+  evidenceUrl: string;
+  financeUrl: string;
+};
+
 export type AtlasPart = {
   id: string;
   name: string;
@@ -14,6 +23,7 @@ export type AtlasPart = {
   color: string;
   sourceUrls: string[];
   confidence: 'high' | 'medium' | 'contextual';
+  vendor?: AtlasVendor;
 };
 
 export type AtlasHotspot = {
