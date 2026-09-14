@@ -411,7 +411,7 @@ function subjectMatchesRequest(requested: string, returned: string) {
     .replace(/\bnine\b/g, '9')
     .replace(/[^a-z0-9]+/g, ' ')
     .split(/\s+/)
-    .filter((term) => term.length > 1 && !stopWords.has(term)));
+    .filter((term) => (term.length > 1 || /^\d$/.test(term)) && !stopWords.has(term)));
   const requestedTerms = terms(requested);
   const returnedTerms = terms(returned);
   if (!requestedTerms.size || !returnedTerms.size) return false;
