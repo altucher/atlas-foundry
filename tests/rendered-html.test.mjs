@@ -55,6 +55,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /responses\/\$\{encodeURIComponent\(responseId\)\}/);
   assert.match(generationRoute, /forensic component-supply-chain researcher/);
   assert.match(generationRoute, /Supplier evidence pass/);
+  assert.match(generationRoute, /Coverage is an audit ledger/);
+  assert.match(generationRoute, /const batchSize = 6/);
   assert.match(generationRoute, /ip-licensor/);
   assert.match(galleryRoute, /ATLAS_CACHE_ORIGIN/);
   assert.match(store, /@vercel\/blob/);
@@ -62,6 +64,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(store, /CURRENT_INTELLIGENCE_VERSION/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /foundry-build-journal/);
+  assert.match(page, /COMPONENT AUDIT/);
+  assert.match(page, /Open evidence for/);
   assert.match(page, /RESEARCH REFRESH/);
   assert.match(page, /foundry-connection-lines/);
 });

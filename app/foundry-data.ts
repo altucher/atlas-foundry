@@ -1,4 +1,4 @@
-export const CURRENT_INTELLIGENCE_VERSION = 2;
+export const CURRENT_INTELLIGENCE_VERSION = 3;
 
 export type AtlasSource = {
   id: string;
@@ -9,6 +9,7 @@ export type AtlasSource = {
 
 export type SupplierStatus = 'confirmed' | 'reported' | 'rumored';
 export type SupplierRole = 'manufacturer' | 'assembler' | 'designer' | 'ip-licensor' | 'software-provider' | 'material-supplier' | 'integrator' | 'other';
+export type SupplierResearchStatus = 'sourced' | 'searched-no-specific-evidence' | 'not-applicable' | 'incomplete';
 
 export type AtlasSupplier = {
   company: string;
@@ -21,6 +22,11 @@ export type AtlasSupplier = {
   financeUrl: string | null;
   relationshipStatus: SupplierStatus;
   note: string;
+};
+
+export type AtlasSupplierResearch = {
+  status: SupplierResearchStatus;
+  summary: string;
 };
 
 export type AtlasConnection = {
@@ -39,6 +45,7 @@ export type AtlasPart = {
   sourceUrls: string[];
   confidence: 'high' | 'medium' | 'contextual';
   suppliers?: AtlasSupplier[];
+  supplierResearch?: AtlasSupplierResearch;
   connections?: AtlasConnection[];
 };
 

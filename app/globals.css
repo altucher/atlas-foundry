@@ -376,6 +376,7 @@ a { color: inherit; }
 .vendor-index-list em { color: #69685f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; font-style: normal; }
 .vendor-index-list small { color: #77705c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 5px; white-space: nowrap; }
 .vendor-index-list > p { margin: 10px 8px 0; color: #60635b; font-size: 7px; line-height: 1.5; }
+.vendor-index-list > p.vendor-coverage { margin: 6px 8px 4px; color: #8c826b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 5px; letter-spacing: .08em; }
 .foundry-mode { display: flex; align-items: center; gap: 9px; margin-top: 22px; padding-top: 17px; border-top: 1px solid var(--foundry-line); }
 .foundry-mode > i { width: 6px; height: 6px; border-radius: 50%; background: #a4b69a; box-shadow: 0 0 11px #a4b69a6b; }
 .foundry-mode > i.generated { background: #c4ab72; box-shadow: 0 0 11px #c4ab726b; }
@@ -467,6 +468,12 @@ a { color: inherit; }
 .foundry-detail dl div + div { padding-left: 16px; border-left: 1px solid var(--foundry-line); }
 .foundry-detail dt { color: #5e6159; font-size: 7px; letter-spacing: .13em; text-transform: uppercase; }
 .foundry-detail dd { margin: 6px 0 0; color: #b3b0a5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; text-transform: uppercase; }
+.supplier-audit { display: grid; gap: 5px; margin-top: 14px; padding: 10px 11px; border-left: 2px solid #8ca17a; background: #788a6810; }
+.supplier-audit.searched-no-specific-evidence, .supplier-audit.not-applicable { border-left-color: #7b776b; background: #ffffff08; }
+.supplier-audit.incomplete { border-left-color: #b5735b; background: #b5735b0d; }
+.supplier-audit > span { color: #77705c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 5px; letter-spacing: .14em; }
+.supplier-audit > strong { color: #c6c1b3; font-size: 8px; font-weight: 500; }
+.supplier-audit > p { margin: 0; color: #77766d; font-size: 7px; line-height: 1.55; }
 .foundry-suppliers { display: grid; gap: 8px; margin-top: 18px; }
 .foundry-suppliers > span { color: #8d8062; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .16em; }
 .foundry-supplier { display: grid; grid-template-columns: 1fr auto; gap: 7px 10px; padding: 12px; border: 1px solid #c4ad7240; background: linear-gradient(135deg, #302819a6, #15150f99); }
@@ -479,7 +486,8 @@ a { color: inherit; }
 .foundry-supplier strong { overflow: hidden; color: #ddd3bd; font-size: 9px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .foundry-supplier small { color: #777366; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; text-transform: uppercase; }
 .foundry-supplier > p { grid-column: 1 / -1; margin: 0; color: #77766d; font-size: 7px; line-height: 1.55; }
-.foundry-supplier a { display: flex; align-items: center; align-self: end; gap: 6px; color: #cbb784; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .08em; text-decoration: none; }
+.supplier-links { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.foundry-supplier a { display: flex; align-items: center; gap: 6px; color: #cbb784; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .08em; text-decoration: none; }
 .foundry-supplier a:hover { color: #f0dfb1; }
 .foundry-supplier a svg { width: 10px; }
 .supplier-private { align-self: end; color: #777366; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .08em; }

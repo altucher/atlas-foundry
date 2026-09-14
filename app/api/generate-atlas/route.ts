@@ -99,12 +99,12 @@ const atlasSchema = {
         properties: {
           id: { type: 'string' }, name: { type: 'string' }, system: { type: 'string' },
           description: { type: 'string' }, sourceId: { type: 'string' }, color: { type: 'string' },
-          sourceUrls: { type: 'array', items: { type: 'string' }, maxItems: 10 },
+          sourceUrls: { type: 'array', items: { type: 'string' }, maxItems: 20 },
           confidence: { type: 'string', enum: ['high', 'medium', 'contextual'] },
           connections: {
             type: 'array',
             minItems: 0,
-            maxItems: 10,
+            maxItems: 16,
             items: {
               type: 'object',
               additionalProperties: false,
@@ -119,7 +119,7 @@ const atlasSchema = {
           suppliers: {
             type: 'array',
             minItems: 0,
-            maxItems: 10,
+            maxItems: 16,
             items: {
               type: 'object',
               additionalProperties: false,
@@ -146,7 +146,7 @@ const atlasSchema = {
 const supplierResearchSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['sources', 'relationships'],
+  required: ['sources', 'relationships', 'coverage'],
   properties: {
     sources: {
       type: 'array', minItems: 1, maxItems: 30,
@@ -177,6 +177,18 @@ const supplierResearchSchema = {
         },
       },
     },
+    coverage: {
+      type: 'array', minItems: 1, maxItems: 8,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['partId', 'status', 'summary'],
+        properties: {
+          partId: { type: 'string' },
+          status: { type: 'string', enum: ['sourced', 'searched-no-specific-evidence', 'not-applicable'] },
+          summary: { type: 'string' },
+        },
+      },
+    },
   },
 } as const;
 
@@ -193,6 +205,11 @@ type SupplierResearchResult = {
     evidenceUrl: string;
     relationshipStatus: 'confirmed' | 'reported' | 'rumored';
     note: string;
+  }>;
+  coverage: Array<{
+    partId: string;
+    status: 'sourced' | 'searched-no-specific-evidence' | 'not-applicable';
+    summary: string;
   }>;
 };
 
@@ -255,7 +272,7 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
       const key = `${normalizedSupplier.company}|${normalizedSupplier.relationshipStatus}|${normalizedSupplier.note}`.toLowerCase();
       if (!supplierMap.has(key)) supplierMap.set(key, normalizedSupplier);
     }
-    const suppliers = [...supplierMap.values()].slice(0, 10);
+    const suppliers = [...supplierMap.values()].slice(0, 16);
     const sourceUrls = part.sourceUrls.map(safeUrl).filter((url) => knownUrls.has(url));
     for (const supplier of suppliers) {
       if (!sourceUrls.includes(supplier.evidenceUrl)) sourceUrls.push(supplier.evidenceUrl);
@@ -268,8 +285,11 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
       description: part.description.slice(0, 420),
       sourceId: part.sourceId.slice(0, 100),
       color: /^#[0-9a-fA-F]{6}$/.test(part.color) ? part.color : '#b9aa89',
-      sourceUrls: sourceUrls.slice(0, 10),
+      sourceUrls: sourceUrls.slice(0, 20),
       suppliers: suppliers.length ? suppliers : undefined,
+      supplierResearch: part.supplierResearch && ['sourced', 'searched-no-specific-evidence', 'not-applicable', 'incomplete'].includes(part.supplierResearch.status)
+        ? { status: part.supplierResearch.status, summary: part.supplierResearch.summary.trim().slice(0, 360) }
+        : undefined,
       connections: part.connections,
     };
   });
@@ -283,7 +303,7 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
         description: connection.description.trim().slice(0, 220),
       }))
       .filter((connection) => knownPartIds.has(connection.toPartId) && connection.toPartId !== part.id)
-      .slice(0, 10),
+      .slice(0, 16),
   }));
   return {
     ...raw,
@@ -377,15 +397,19 @@ async function researchSupplierBatch(
 ) {
   const partList = parts.map((part) => `${part.id} | ${part.name} | ${part.system}`).join('\n');
   const existingSources = atlas.sources.map((source) => `${source.publisher}: ${source.url}`).join('\n');
-  const instructions = `You are a forensic component-supply-chain researcher. Investigate potential vendors for EVERY component id supplied. Search component by component rather than stopping after famous headline suppliers. Return every defensible current, former, alternative, generation-specific, factory-specific, regional, or credible published rumored relationship supported by a returned source. Several companies may be returned for one component.
+  const instructions = `You are a forensic component-supply-chain researcher. Investigate potential vendors for EVERY component id supplied. Give roughly equal research effort to every id; do not stop after easy, famous chips or top-level assemblers. For each component, separately search (1) the exact current product or configuration, (2) older and newer product-family generations, (3) alternate or multisource vendors, (4) factory, geography, model-year, trim, and revision differences, and (5) relevant embedded IP and lower-tier manufacturing roles. Return every defensible current, former, alternative, generation-specific, factory-specific, regional, or credible published rumored relationship supported by a returned source. Several companies may be returned for one component.
 
 Distinguish the vendor's role precisely: manufacturer, assembler, designer, IP licensor, software provider, material supplier, integrator, or other. Treat cell makers and battery-pack assemblers as different roles; likewise distinguish a display-panel maker from the finished display-module assembler, a semiconductor foundry from a chip designer or IP licensor, and a component maker from the product's contract assembler. Include relevant licensed architecture, protocol, codec, semiconductor, software, or other embedded IP only when a source establishes it.
+
+For displays, investigate the panel maker, display-module assembly, backlight or emissive stack, driver/timing electronics, cover material, and product-generation allocation separately when those roles are relevant to the supplied ids. For batteries, distinguish cell maker, pack assembler, protection/BMS electronics, connector/flex, and material supplier. Apply equivalent sub-tier decomposition to cameras, storage, memory, networking, power electronics, thermal systems, motors, braking, steering, structures, and other engineered assemblies. A relationship belongs only on the closest supplied component id that the evidence supports.
 
 For a specific named product, only connect a vendor to a component when the evidence explicitly ties it to that product, product family, teardown, generation, model year, trim, market, factory, or period. A general corporate supplier list confirms that a company supplies the brand, but by itself does not prove which component it supplies. Use it as corroboration, not as an invented component mapping. For a generic category, a relationship may show that the vendor makes or sells that exact component class; the note must call it a representative market offering and not evidence of deployment in one facility.
 
 Set confirmed only for first-party statements, regulatory records, procurement records, direct component markings/teardowns, or customer/supplier material that establishes the relationship. Set reported for a credible established technical, industry, or financial publication. Set rumored only when a real returned publication explicitly makes the claim. Do not convert repetition, resale listings, repair-shop marketing, or visual resemblance into evidence.
 
-Each note must state the role, exact product/version/time scope, whether the relationship is current, historical, alternative, or uncertain, and what the cited source actually establishes. Every evidenceUrl must exactly match one URL in sources. Use real HTTPS URLs consulted in this pass. Set current public-company ticker, exchange, and exact Yahoo symbol; use null for all three private-company fields. Return no relationship when evidence is inadequate.`;
+Each note must state the role, exact product/version/time scope, whether the relationship is current, historical, alternative, or uncertain, and what the cited source actually establishes. Every evidenceUrl must exactly match one URL in sources. Use real HTTPS URLs consulted in this pass. Set current public-company ticker, exchange, and exact Yahoo symbol; use null for all three private-company fields. Return no relationship when evidence is inadequate.
+
+Coverage is an audit ledger, not a confidence performance. Return exactly one coverage entry for every supplied partId. Use sourced when at least one retained relationship is backed by a component-specific source; searched-no-specific-evidence when you searched the avenues above but found no sufficiently specific relationship; and not-applicable only when the item genuinely has no external vendor or IP relationship to research. The summary must briefly state which product-family/current/historical avenues were checked and why evidence was retained or withheld. Never omit a supplied partId.`;
   report({ stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} · checking ${parts.length} components individually…` });
   const payload = await generateResearchInBackground(connection, {
     model: connection.researchModel,
@@ -402,7 +426,9 @@ async function enrichSuppliers(
   atlas: ReturnType<typeof normalizeAtlas>,
   report: ProgressReporter,
 ) {
-  const batchSize = 20;
+  // Small batches stop famous components from consuming the search budget that
+  // should have gone to less-visible assemblies such as displays and batteries.
+  const batchSize = 6;
   const batches = Array.from({ length: Math.ceil(atlas.parts.length / batchSize) }, (_, index) => atlas.parts.slice(index * batchSize, (index + 1) * batchSize));
   const settled = await Promise.allSettled(batches.map((parts, index) => researchSupplierBatch(connection, atlas, parts, index, batches.length, report)));
   const successful = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
@@ -413,7 +439,18 @@ async function enrichSuppliers(
   if (failedCount) report({ stage: 'vendor', message: `${failedCount} of ${settled.length} supplier evidence ${failedCount === 1 ? 'pass was' : 'passes were'} unavailable; preserving all verified results from the completed passes.` });
   if (!successful.length) {
     report({ stage: 'vendor', message: 'No additional defensible supplier mappings were returned; retaining any relationships found in the architecture pass.' });
-    return atlas;
+    return {
+      ...atlas,
+      parts: atlas.parts.map((part) => ({
+        ...part,
+        supplierResearch: {
+          status: part.suppliers?.length ? 'sourced' as const : 'incomplete' as const,
+          summary: part.suppliers?.length
+            ? 'The architecture pass returned at least one sourced relationship, but the dedicated component audit was unavailable.'
+            : 'The dedicated component-specific supplier pass was unavailable. No absence-of-supplier conclusion should be drawn.',
+        },
+      })),
+    };
   }
 
   const sourceByUrl = new Map(atlas.sources.map((source) => [source.url, source]));
@@ -428,20 +465,55 @@ async function enrichSuppliers(
   }
   const sources = [...sourceByUrl.values()].map((source, index) => ({ ...source, id: `source-${index + 1}` }));
   const relationships = successful.flatMap((result) => result.relationships);
-  const enriched = normalizeAtlas({
+  const coverageByPartId = new Map(successful.flatMap((result) => result.coverage).map((coverage) => [coverage.partId, coverage]));
+  const normalizedEnriched = normalizeAtlas({
     ...atlas,
     sources,
     parts: atlas.parts.map((part) => ({
       ...part,
+      supplierResearch: coverageByPartId.has(part.id)
+        ? {
+            status: coverageByPartId.get(part.id)!.status,
+            summary: coverageByPartId.get(part.id)!.summary,
+          }
+        : {
+            status: 'incomplete',
+            summary: 'The component-specific supplier pass did not return an audit record for this item. No absence-of-supplier conclusion should be drawn.',
+          },
       suppliers: [
         ...(part.suppliers ?? []),
         ...relationships.filter((relationship) => relationship.partId === part.id).map((relationship) => ({ ...relationship, financeUrl: null })),
       ],
     })),
   });
+  const enriched = {
+    ...normalizedEnriched,
+    parts: normalizedEnriched.parts.map((part) => {
+      if (part.suppliers?.length) {
+        return {
+          ...part,
+          supplierResearch: {
+            status: 'sourced' as const,
+            summary: part.supplierResearch?.summary || `${part.suppliers.length} claim-specific supplier or IP relationship${part.suppliers.length === 1 ? ' was' : 's were'} retained for this component.`,
+          },
+        };
+      }
+      if (part.supplierResearch?.status === 'sourced') {
+        return {
+          ...part,
+          supplierResearch: {
+            status: 'incomplete' as const,
+            summary: `${part.supplierResearch.summary} The returned relationship did not pass source or company-identity validation, so it is not displayed.`,
+          },
+        };
+      }
+      return part;
+    }),
+  };
   const relationshipCount = enriched.parts.reduce((count, part) => count + (part.suppliers?.length ?? 0), 0);
   const companyCount = new Set(enriched.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.company))).size;
-  report({ stage: 'vendor', message: `Mapped ${relationshipCount} sourced component relationships across ${companyCount} potential vendors, including historical and variant-specific records.` });
+  const auditedCount = enriched.parts.filter((part) => part.supplierResearch?.status !== 'incomplete').length;
+  report({ stage: 'vendor', message: `Audited ${auditedCount}/${enriched.parts.length} components and mapped ${relationshipCount} sourced relationships across ${companyCount} potential vendors, including historical and variant-specific records.` });
   return enriched;
 }
 

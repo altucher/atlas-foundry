@@ -34,6 +34,13 @@ function supplierStatusLabel(status: NonNullable<AtlasPart['suppliers']>[number]
   return status === 'confirmed' ? 'Confirmed' : status === 'reported' ? 'Reported' : 'Rumor';
 }
 
+function supplierResearchLabel(status: NonNullable<AtlasPart['supplierResearch']>['status']) {
+  if (status === 'sourced') return 'Sourced relationships found';
+  if (status === 'searched-no-specific-evidence') return 'Searched · no specific evidence';
+  if (status === 'not-applicable') return 'No external supplier expected';
+  return 'Research incomplete';
+}
+
 function useCompactLayout() {
   const [compact, setCompact] = useState(false);
   useEffect(() => {
@@ -123,6 +130,8 @@ export default function FoundryHome() {
     });
   }, [activeSystem, activeVendor, atlas.parts, partQuery]);
   const selectedPart = atlas.parts.find((part) => part.id === selectedId) ?? visibleParts[0] ?? atlas.parts[0];
+  const auditedPartCount = atlas.parts.filter((part) => part.supplierResearch && part.supplierResearch.status !== 'incomplete').length;
+  const sourcedPartCount = atlas.parts.filter((part) => part.suppliers?.length).length;
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
   const selectedConnections = (selectedPart?.connections ?? []).flatMap((connection) => {
     const part = atlas.parts.find((candidate) => candidate.id === connection.toPartId);
@@ -368,6 +377,7 @@ export default function FoundryHome() {
             </button>
             {vendorsOpen && (
               <div className="vendor-index-list">
+                {auditedPartCount ? <p className="vendor-coverage">COMPONENT AUDIT · {auditedPartCount}/{atlas.parts.length} CHECKED · {sourcedPartCount} WITH RELATIONSHIPS</p> : null}
                 {vendors.length ? vendors.map((vendor) => (
                   <button type="button" key={vendor.company} className={activeVendor === vendor.company ? 'active' : ''} onClick={() => chooseVendor(vendor)}>
                     <span><strong>{vendor.company}</strong><em>{vendor.ticker ?? 'PRIVATE'}</em></span>
@@ -549,6 +559,13 @@ export default function FoundryHome() {
                 <div><dt>Evidence</dt><dd>{selectedPart.confidence}</dd></div>
                 <div><dt>References</dt><dd>{selectedSources.length || 'Catalog'}</dd></div>
               </dl>
+              {selectedPart.supplierResearch ? (
+                <div className={`supplier-audit ${selectedPart.supplierResearch.status}`}>
+                  <span>SUPPLIER RESEARCH</span>
+                  <strong>{supplierResearchLabel(selectedPart.supplierResearch.status)}</strong>
+                  <p>{selectedPart.supplierResearch.summary}</p>
+                </div>
+              ) : null}
               {selectedPart.suppliers?.length ? (
                 <div className="foundry-suppliers">
                   <span>SUPPLIERS / VENDORS</span>
@@ -560,11 +577,16 @@ export default function FoundryHome() {
                         <small>{`${(supplier.role ?? 'component supplier').replaceAll('-', ' ')} · ${supplier.isPublicCompany ? `${supplier.exchange} · ${supplier.ticker}` : 'PRIVATE COMPANY · NO PUBLIC TICKER'}`}</small>
                       </div>
                       <p>{supplier.note}</p>
-                      {supplier.financeUrl ? (
-                        <a href={supplier.financeUrl} target="_blank" rel="noreferrer" aria-label={`View ${supplier.company} on Yahoo Finance`}>
-                          YAHOO FINANCE <ExternalLink />
+                      <div className="supplier-links">
+                        <a href={supplier.evidenceUrl} target="_blank" rel="noreferrer" aria-label={`Open evidence for ${supplier.company}`}>
+                          EVIDENCE <ExternalLink />
                         </a>
-                      ) : <span className="supplier-private">PRIVATE VENDOR</span>}
+                        {supplier.financeUrl ? (
+                          <a href={supplier.financeUrl} target="_blank" rel="noreferrer" aria-label={`View ${supplier.company} on Yahoo Finance`}>
+                            YAHOO FINANCE <ExternalLink />
+                          </a>
+                        ) : <span className="supplier-private">PRIVATE VENDOR</span>}
+                      </div>
                     </div>
                   ))}
                   <p className="supplier-disclaimer">Roles distinguish makers, assemblers, designers, IP licensors, software/material providers, and integrators. Relationships may be current, former, alternate, or generation-specific. Reported and rumor labels are sourced claims—not confirmation or investment advice.</p>
