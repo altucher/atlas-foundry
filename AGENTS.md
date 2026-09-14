@@ -11,12 +11,13 @@ When a user asks you to use this repository to create an exploding atlas for a n
    - **verified 3D**: authoritative meshes and metadata are available and their identity/license can be preserved; or
    - **conceptual 2.5D**: research supports a component catalog, but exact separated geometry is unavailable.
 3. State the chosen fidelity honestly in the interface and README. Never describe AI-generated imagery or inferred internals as exact geometry.
-4. Research authoritative sources first: manufacturer manuals, standards, museums, universities, government agencies, source datasets, and peer-reviewed references. Use 18–30 evidence-backed records for complex machines and preserve documented second-level assemblies instead of collapsing them into a short exterior overview.
+4. Research authoritative sources first: manufacturer manuals and product pages, standards, museums, universities, government agencies, source datasets, and peer-reviewed references. Use 36–60 evidence-backed records for complex machines or infrastructure and preserve documented second-, third-, and readable fourth-level assemblies instead of collapsing them into a short exterior overview.
 5. Preserve every source URL and identifier used by the component records. Do not invent part names, hidden internals, dimensions, or identifiers.
 6. Keep all visible pieces clickable and ensure the fully exploded layout is non-overlapping on desktop and mobile. Use a portrait plate for strongly vertical subjects such as launch vehicles.
-7. A component may have multiple publicly traded suppliers. Label every relationship `confirmed`, `reported`, or `rumored`; include a claim-specific source and scope note; never promote inference or internet repetition into a rumor.
-8. Add subject-specific safety, medical, legal, or service disclaimers where appropriate. Do not turn an educational atlas into hazardous teardown instructions.
-9. Run the complete validation sequence before handing off or publishing.
+7. A component may have multiple private or publicly traded suppliers. Label every relationship `confirmed`, `reported`, or `rumored`; include a claim-specific source and scope note; never promote inference or internet repetition into a rumor. For a generic category, supplier entries represent supported alternatives for a component class and must not imply that every vendor appears in one installation.
+8. For a generic category such as a data center, construct a vendor-neutral reference architecture across the full operating chain and add direct power, data, thermal, fluid, mechanical, structural, and control connections between returned component IDs.
+9. Add subject-specific safety, medical, legal, or service disclaimers where appropriate. Do not turn an educational atlas into hazardous teardown instructions.
+10. Run the complete validation sequence before handing off or publishing.
 
 ## Main extension points
 
@@ -34,13 +35,14 @@ Create a `FoundryAtlas` record containing:
 
 - a precise subject and scope;
 - a short accuracy boundary;
-- 8–16 meaningful components for simple subjects or 18–30 for complex engineered subjects;
+- 12–24 meaningful components for simple subjects or 36–60 for complex engineered subjects;
 - stable internal component IDs;
 - system/category assignments and accessible colors;
 - concise educational descriptions;
 - confidence labels;
 - direct HTTPS sources for each component.
 - zero or more publicly traded supplier records, each with relationship status, evidence, scope note, ticker, and Yahoo Finance symbol.
+- direct component-to-component connections when they explain power, data, thermal, fluid, mechanical, structural, or control flow.
 
 Add it as a prompt-matched preset in `app/page.tsx`. Use a code-native SVG for a deterministic assembled illustration or add a properly licensed raster asset under `public/`. Clearly label illustrative visuals.
 

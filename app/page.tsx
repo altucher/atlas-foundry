@@ -21,7 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { TESLA_DEMO, type AtlasGalleryItem, type AtlasPart, type FoundryAtlas } from './foundry-data';
 
-const examples = ['Falcon 9', 'Tesla', 'espresso machine', 'DSLR camera', 'a male human body'];
+const examples = ['data center', 'Falcon 9', 'Tesla', 'espresso machine', 'a male human body'];
 
 function supplierSummary(part: AtlasPart) {
   const suppliers = part.suppliers ?? [];
@@ -62,6 +62,11 @@ function targetPosition(index: number, count: number, compact: boolean) {
 
 function sourceForPart(atlas: FoundryAtlas, part: AtlasPart) {
   return atlas.sources.filter((source) => part.sourceUrls.includes(source.url));
+}
+
+function primaryHotspot(atlas: FoundryAtlas, partId: string) {
+  const hotspot = atlas.hotspots?.[partId];
+  return Array.isArray(hotspot) ? hotspot[0] : hotspot;
 }
 
 type VendorEntry = {
@@ -113,12 +118,17 @@ export default function FoundryHome() {
       const inSystem = activeSystem === 'All systems' || part.system === activeSystem;
       const inVendor = !activeVendor || (part.suppliers ?? []).some((supplier) => supplier.company === activeVendor);
       const supplierTerms = (part.suppliers ?? []).map((supplier) => `${supplier.company} ${supplier.ticker ?? ''} ${supplier.relationshipStatus}`).join(' ');
-      const matches = !term || `${part.name} ${part.system} ${part.sourceId} ${supplierTerms}`.toLowerCase().includes(term);
+      const connectionTerms = (part.connections ?? []).map((connection) => `${connection.relationship} ${connection.description} ${connection.toPartId}`).join(' ');
+      const matches = !term || `${part.name} ${part.system} ${part.sourceId} ${supplierTerms} ${connectionTerms}`.toLowerCase().includes(term);
       return inSystem && inVendor && matches;
     });
   }, [activeSystem, activeVendor, atlas.parts, partQuery]);
   const selectedPart = atlas.parts.find((part) => part.id === selectedId) ?? visibleParts[0] ?? atlas.parts[0];
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
+  const selectedConnections = (selectedPart?.connections ?? []).flatMap((connection) => {
+    const part = atlas.parts.find((candidate) => candidate.id === connection.toPartId);
+    return part ? [{ connection, part }] : [];
+  });
   const hasIllustratedExplosion = Boolean(atlas.explodedImage);
   const showingEveryPart = visibleParts.length === atlas.parts.length;
   const supplierCount = vendors.length;
@@ -407,6 +417,25 @@ export default function FoundryHome() {
                 alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`}
                 style={{ opacity: showingEveryPart ? Math.max(0, Math.min(1, (explode - 0.82) / 0.18)) : 0 }}
               />
+              {selectedPart && selectedConnections.length > 0 && !activeVendor && (
+                <svg className="foundry-connection-lines" viewBox="0 0 100 100" preserveAspectRatio="none" style={{ opacity: Math.max(0, Math.min(1, (explode - 0.22) * 2.2)) }} aria-hidden="true">
+                  {selectedConnections.flatMap(({ connection, part }) => {
+                    const from = primaryHotspot(atlas, selectedPart.id);
+                    const to = primaryHotspot(atlas, part.id);
+                    if (!from || !to || !visibleParts.some((candidate) => candidate.id === part.id)) return [];
+                    const x1 = 50 + (from.x - 50) * explode;
+                    const y1 = 46 + (from.y - 46) * explode;
+                    const x2 = 50 + (to.x - 50) * explode;
+                    const y2 = 46 + (to.y - 46) * explode;
+                    return (
+                      <g key={`${selectedPart.id}-${part.id}-${connection.relationship}`} className={`connection-${connection.relationship}`}>
+                        <line x1={x1} y1={y1} x2={x2} y2={y2} />
+                        <circle cx={x2} cy={y2} r="0.75" />
+                      </g>
+                    );
+                  })}
+                </svg>
+              )}
               <div className="foundry-part-layers" aria-hidden="true">
                 {visibleParts.flatMap((part) => {
                   const hotspot = atlas.hotspots?.[part.id];
@@ -531,6 +560,18 @@ export default function FoundryHome() {
                     </div>
                   ))}
                   <p className="supplier-disclaimer">Supplier relationships can vary by generation, model year, trim, market, and plant. Reported and rumor labels are sourced claims—not confirmation or investment advice.</p>
+                </div>
+              ) : null}
+              {selectedConnections.length ? (
+                <div className="foundry-connections-list">
+                  <span>CONNECTIONS / POWER · DATA · THERMAL · PHYSICAL</span>
+                  {selectedConnections.map(({ connection, part }) => (
+                    <button type="button" key={`${connection.toPartId}-${connection.relationship}`} onClick={() => { setSelectedId(part.id); setActiveSystem('All systems'); setActiveVendor(null); setPartQuery(''); setExplode((amount) => Math.max(amount, 0.72)); }}>
+                      <i className={`connection-${connection.relationship}`}>{connection.relationship}</i>
+                      <span><strong>{part.name}</strong><small>{connection.description}</small></span>
+                      <ChevronRight />
+                    </button>
+                  ))}
                 </div>
               ) : null}
               <div className="foundry-citations">

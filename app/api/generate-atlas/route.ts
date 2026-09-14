@@ -72,7 +72,7 @@ const atlasSchema = {
     visualPrompt: { type: 'string' },
     imageOrientation: { type: 'string', enum: ['landscape', 'portrait'] },
     sources: {
-      type: 'array', minItems: 2, maxItems: 32,
+      type: 'array', minItems: 2, maxItems: 40,
       items: {
         type: 'object', additionalProperties: false,
         required: ['id', 'title', 'publisher', 'url'],
@@ -82,19 +82,34 @@ const atlasSchema = {
       },
     },
     parts: {
-      type: 'array', minItems: 10, maxItems: 40,
+      type: 'array', minItems: 12, maxItems: 60,
       items: {
         type: 'object', additionalProperties: false,
-        required: ['id', 'name', 'system', 'description', 'sourceId', 'color', 'sourceUrls', 'confidence', 'suppliers'],
+        required: ['id', 'name', 'system', 'description', 'sourceId', 'color', 'sourceUrls', 'confidence', 'suppliers', 'connections'],
         properties: {
           id: { type: 'string' }, name: { type: 'string' }, system: { type: 'string' },
           description: { type: 'string' }, sourceId: { type: 'string' }, color: { type: 'string' },
-          sourceUrls: { type: 'array', items: { type: 'string' }, maxItems: 8 },
+          sourceUrls: { type: 'array', items: { type: 'string' }, maxItems: 10 },
           confidence: { type: 'string', enum: ['high', 'medium', 'contextual'] },
+          connections: {
+            type: 'array',
+            minItems: 0,
+            maxItems: 10,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['toPartId', 'relationship', 'description'],
+              properties: {
+                toPartId: { type: 'string' },
+                relationship: { type: 'string', enum: ['power', 'data', 'thermal', 'fluid', 'mechanical', 'structural', 'control', 'other'] },
+                description: { type: 'string' },
+              },
+            },
+          },
           suppliers: {
             type: 'array',
             minItems: 0,
-            maxItems: 8,
+            maxItems: 10,
             items: {
               type: 'object',
               additionalProperties: false,
@@ -148,7 +163,7 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
     }))
     .filter((source) => source.url);
   const knownUrls = new Set(sources.map((source) => source.url));
-  const parts: AtlasPart[] = raw.parts.slice(0, 40).map((part, index) => {
+  const parts: AtlasPart[] = raw.parts.slice(0, 60).map((part, index) => {
     const supplierMap = new Map<string, NonNullable<AtlasPart['suppliers']>[number]>();
     for (const supplier of part.suppliers ?? []) {
       const evidenceUrl = safeUrl(supplier.evidenceUrl);
@@ -175,7 +190,7 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
       const key = `${normalizedSupplier.company}|${normalizedSupplier.relationshipStatus}|${normalizedSupplier.note}`.toLowerCase();
       if (!supplierMap.has(key)) supplierMap.set(key, normalizedSupplier);
     }
-    const suppliers = [...supplierMap.values()].slice(0, 8);
+    const suppliers = [...supplierMap.values()].slice(0, 10);
     const sourceUrls = part.sourceUrls.map(safeUrl).filter((url) => knownUrls.has(url));
     for (const supplier of suppliers) {
       if (!sourceUrls.includes(supplier.evidenceUrl)) sourceUrls.push(supplier.evidenceUrl);
@@ -188,20 +203,33 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
       description: part.description.slice(0, 420),
       sourceId: part.sourceId.slice(0, 100),
       color: /^#[0-9a-fA-F]{6}$/.test(part.color) ? part.color : '#b9aa89',
-      sourceUrls: sourceUrls.slice(0, 8),
+      sourceUrls: sourceUrls.slice(0, 10),
       suppliers: suppliers.length ? suppliers : undefined,
+      connections: part.connections,
     };
   });
+  const knownPartIds = new Set(parts.map((part) => part.id));
+  const connectedParts = parts.map((part) => ({
+    ...part,
+    connections: (part.connections ?? [])
+      .map((connection) => ({
+        toPartId: connection.toPartId.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80),
+        relationship: connection.relationship,
+        description: connection.description.trim().slice(0, 220),
+      }))
+      .filter((connection) => knownPartIds.has(connection.toPartId) && connection.toPartId !== part.id)
+      .slice(0, 10),
+  }));
   return {
     ...raw,
     imageOrientation: raw.imageOrientation === 'portrait' ? 'portrait' as const : 'landscape' as const,
     sources,
-    parts,
+    parts: connectedParts,
   };
 }
 
 function fallbackHotspots(parts: AtlasPart[]) {
-  const columns = parts.length <= 8 ? 3 : parts.length <= 24 ? 4 : 5;
+  const columns = parts.length <= 8 ? 3 : parts.length <= 24 ? 4 : parts.length <= 40 ? 5 : 6;
   const rows = Math.ceil(parts.length / columns);
   return Object.fromEntries(parts.map((part, index) => {
     const row = Math.floor(index / columns);
@@ -233,7 +261,7 @@ async function generateImage(
   const sharedDirection = `Photorealistic premium 3D product visualization of ${subject}. ${visualPrompt} ${formatDirection} Canonical three-quarter view, deep charcoal and limestone museum studio, restrained graphite palette, realistic materials, precise soft key light and crisp rim lighting, high contrast with readable shadow detail. No people, no text, no labels, no arrows, no logos, no watermark, no workshop clutter. Educational conceptual visualization, not an engineering drawing or service guide.`;
   const modeDirection = mode === 'assembled'
     ? 'Show one complete, fully assembled object centered and intact. No cutaway, no exposed internals, and no floating or duplicated parts. Leave generous dark negative space around the silhouette.'
-    : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. Keep the recognizable main shell or enclosing structure central. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
+    : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. Keep the recognizable main shell or enclosing structure central. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
   const response = await fetch(`${connection.baseUrl}/images/generations`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
@@ -376,17 +404,21 @@ export async function POST(request: Request) {
   recent.push(now);
   requestWindows.set(clientId, recent);
 
-  const instructions = `You create careful, unusually detailed educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals, museums, universities, government sources, standards bodies, regulatory filings, SEC or exchange filings, and strong technical references.
+  const instructions = `You create careful, unusually detailed educational component atlases. Research the requested subject on the public web, prioritizing first-party manuals and product pages, museums, universities, government sources, standards bodies, regulatory filings, SEC or exchange filings, and strong technical references.
 
-Build the fullest useful component inventory that public evidence supports, within 10–40 physically distinct records. Use 10–20 parts for simple objects and 24–40 for complex engineered products, vehicles, rockets, aircraft, or machines. For a complex subject, do not stop at exterior sections: include documented second- and third-level assemblies such as structures, tanks, domes, conduits, valves, pumps, motors, actuators, bearings, propulsion units, engine clusters, control hardware, avionics, interfaces, thermal hardware, recovery hardware, protective enclosures, and other identifiable micro-components when the sources support them. Repeated assemblies may be one clearly named record with the documented quantity. Avoid filler, synonyms, duplicated records, generic fasteners, and details too small to identify even within a filtered exploded plate.
+First decide whether the subject is a specific named product or a generic product/category made in many configurations. For a generic category, build a clearly labeled vendor-neutral reference architecture: show the most detailed plausible set of layers and alternative components supported by current public sources, but never imply that every listed component or vendor appears in one real installation. For infrastructure categories, follow the complete operating chain across facility, structure, utility inputs, distribution, safety, thermal systems, compute/control equipment, internal subassemblies, interfaces, networking, monitoring, and outputs. For example, a data-center atlas should be able to reach from the building, utility feed, generators, switchgear, UPS, busway/PDU, chillers or liquid-cooling loops and CDUs through pods, racks, servers, motherboards, CPUs, GPUs/accelerators, memory, storage, NICs/DPUs, leaf/spine switches, optical transceivers, fiber, DCI, controls, fire suppression, and physical security when supported—not stop at racks and servers.
+
+Build the fullest useful component inventory that public evidence supports, within 12–60 physically or operationally distinct records. Use 12–24 parts for simple objects and 36–60 for complex engineered products, infrastructure, vehicles, rockets, aircraft, or machines. For a complex subject, do not stop at exterior sections: include documented second-, third-, and readable fourth-level assemblies such as structures, tanks, domes, conduits, valves, pumps, motors, actuators, bearings, propulsion units, engine clusters, control hardware, avionics, interfaces, thermal hardware, recovery hardware, protective enclosures, and other identifiable micro-components when the sources support them. Repeated assemblies may be one clearly named record with the documented quantity. Avoid filler, synonyms, duplicated records, generic fasteners, and details too small to identify even within a filtered exploded plate.
 
 Never invent proprietary internals, exact geometry, hidden components, identifiers, suppliers, or stock listings. When documentation supports the existence of an assembly but not its precise construction, include it only at the supported assembly level and mark confidence contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one returned source URL when possible.
 
-For an engineered product, suppliers is a list because one component may have multiple suppliers across variants, factories, generations, model years, contracts, or reports. Include both public and private suppliers when evidence supports the relationship. When vendors differ by generation, year, trim, market, factory, or revision, include each separately and make that distinction explicit in note. Set one evidence status per relationship:
+For an engineered product, suppliers is a list because one component may have multiple suppliers across variants, factories, generations, model years, contracts, or reports. Include both public and private suppliers when evidence supports the relationship. For a named product, a supplier record means evidence connects that vendor to that product. For a generic category, a supplier record instead means evidence shows that the vendor makes or sells that exact component class; make the note say it is a representative vendor offering and not proof of deployment in any one facility. Include multiple credible alternative vendors per component when sources support them, rather than selecting one arbitrary company. When vendors differ by generation, year, trim, market, factory, or revision, include each separately and make that distinction explicit in note. Set one evidence status per relationship:
 - confirmed: first-party, regulatory filing, customer, or supplier evidence directly confirms the component relationship;
 - reported: a credible established technical or financial publication reports it, but the companies do not directly confirm it;
 - rumored: a published rumor, analyst claim, or teardown inference alleges it without confirmation.
-Rumors are allowed only when a real returned source publishes the claim. Never turn absence of evidence, visual resemblance, internet repetition, or your own inference into a rumor. The note must briefly state what product generation, version, period, region, plant, trim, or uncertainty the claim applies to. Do not treat the product's brand owner as a component supplier unless it actually manufactures that named component. Each evidenceUrl must exactly match one URL in sources that supports the component-supplier relationship, and part.sourceUrls must include it. Set isPublicCompany accurately. For a public company, ticker is its current exchange ticker and yahooSymbol is the exact symbol Yahoo Finance uses, including market suffixes such as .T, .DE, or .KS. For a private company, set ticker, exchange, and yahooSymbol to null.
+Rumors are allowed only when a real returned source publishes the claim. Never turn absence of evidence, visual resemblance, internet repetition, or your own inference into a rumor. The note must briefly state what product generation, version, period, region, plant, trim, generic-market role, or uncertainty the claim applies to. Do not treat the product's brand owner as a component supplier unless it actually manufactures that named component. Each evidenceUrl must exactly match one URL in sources that supports the component-supplier relationship, and part.sourceUrls must include it. Set isPublicCompany accurately. For a public company, ticker is its current exchange ticker and yahooSymbol is the exact symbol Yahoo Finance uses, including market suffixes such as .T, .DE, or .KS. For a private company, set ticker, exchange, and yahooSymbol to null.
+
+Use connections to explain architecture. For each part, list up to ten directly connected returned part ids and classify each relationship as power, data, thermal, fluid, mechanical, structural, control, or other. The description must state what crosses the interface and in which direction when meaningful—for example electrical power, coolant, air, optical data, packets, torque, exhaust, or control signals. Use exact ids from the same parts array, never external or invented ids. Prefer a connected system graph over isolated component cards, but do not duplicate reciprocal edges unless each direction teaches something different.
 
 Set imageOrientation to portrait for strongly vertical subjects such as launch vehicles, towers, standing anatomy, or long upright tools; otherwise use landscape. The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, literally exhaustive parts database, or investment recommendation.`;
 
@@ -399,7 +431,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
         model: connection.researchModel,
         instructions,
         input: `Build a component atlas for: ${prompt}`,
-        tools: [{ type: 'web_search', search_context_size: 'medium' }],
+        tools: [{ type: 'web_search', search_context_size: 'high' }],
         text: { format: { type: 'json_schema', name: 'component_atlas', strict: true, schema: atlasSchema } },
       }),
     });

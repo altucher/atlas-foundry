@@ -43,9 +43,14 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /saveAtlasToGallery/);
   assert.match(generationRoute, /application\/x-ndjson/);
   assert.match(generationRoute, /Source ·/);
+  assert.match(generationRoute, /vendor-neutral reference architecture/);
+  assert.match(generationRoute, /data-center atlas/);
+  assert.match(generationRoute, /connections to explain architecture/);
+  assert.match(generationRoute, /maxItems: 60/);
   assert.match(galleryRoute, /ATLAS_CACHE_ORIGIN/);
   assert.match(store, /@vercel\/blob/);
   assert.match(store, /cacheKeyForPrompt/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /foundry-build-journal/);
+  assert.match(page, /foundry-connection-lines/);
 });

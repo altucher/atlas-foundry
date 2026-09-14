@@ -1,6 +1,6 @@
 # Atlas Foundry
 
-Atlas Foundry turns a subject into a sourced, clickable component atlas. Enter an object such as “espresso machine” or “DSLR camera”; the server researches reliable public sources, builds a concise component catalog, generates matched photorealistic assembled and exploded views, and maps the documented parts into a clickable visual index.
+Atlas Foundry turns a subject into a sourced, clickable component atlas. Enter an object such as “espresso machine,” “Tesla,” or “data center”; the server researches reliable public sources, builds a deep component catalog, generates matched photorealistic assembled and exploded views, and maps the documented parts into a clickable visual index.
 
 **Live demo:** [build-an-interactive-3d-human-atlas.vercel.app](https://build-an-interactive-3d-human-atlas.vercel.app)
 
@@ -41,7 +41,7 @@ npm run build
 
 ## Product modes
 
-- **Generated atlas:** web research with cited first-party or authoritative sources, 10–20 records for simple objects or 24–40 records for complex machines, a high-quality photorealistic assembled/exploded image pair, independently animated visual component layers, full-component click regions, system and vendor filters, component search, continuous explosion control, and multiple source-backed private or public supplier records. Public companies receive Yahoo Finance links.
+- **Generated atlas:** web research with cited first-party or authoritative sources, 12–24 records for simple objects or 36–60 records for complex products and infrastructure, a high-quality photorealistic assembled/exploded image pair, independently animated visual component layers, full-component click regions, system and vendor filters, component and connection search, continuous explosion control, and multiple source-backed private or public supplier records. Public companies receive Yahoo Finance links.
 - **Curated demo:** a ready-to-show cross-generation Tesla electric-vehicle systems overview with paired assembled/exploded studio illustrations and twelve clickable component regions. Supplier notes identify the generation, model year, trim, market, or plant supported by each source. It is explicitly conceptual; the hotspots are a visual index, not service geometry.
 - **Verified 3D edition:** the `/human` route uses identity-preserving BodyParts3D source meshes, GPU per-part transforms, geometric picking, and true visible-only exploded packing.
 
@@ -70,11 +70,12 @@ public/ATTRIBUTION.md         Anatomy data license and adaptation details
 
 `POST /api/generate-atlas` accepts `{ "prompt": "…" }` and performs two server-side operations:
 
-1. The OpenAI Responses API researches the public web and returns a strict component-atlas schema with up to 40 components and 32 supporting HTTPS sources. Complex products retain documented second- and third-level assemblies and readable micro-components instead of being reduced to a short exterior overview.
-2. For engineered products, each component may list multiple private or publicly traded suppliers. Every relationship is visibly classified as **confirmed**, **reported**, or **rumored**, includes a claim-specific source and a generation/model-year/trim/market/plant applicability note when available. Public companies receive a server-derived Yahoo Finance URL; private suppliers are clearly labeled. A rumor must be a published claim; unsupported model inference is discarded.
+1. The OpenAI Responses API first distinguishes a named product from a generic category, researches the public web, and returns a strict component-atlas schema with up to 60 components and 40 supporting HTTPS sources. Complex products retain documented second-, third-, and readable fourth-level assemblies instead of being reduced to a short exterior overview. Generic subjects such as “data center” become vendor-neutral reference architectures spanning the full operating chain rather than a fictional single installation.
+2. For engineered products, each component may list multiple private or publicly traded suppliers. Every relationship is visibly classified as **confirmed**, **reported**, or **rumored**, includes a claim-specific source and a generation/model-year/trim/market/plant applicability note when available. For a generic category, supplier records are explicitly described as representative alternatives for that component class—not evidence that every vendor appears in one deployment. Public companies receive a server-derived Yahoo Finance URL; private suppliers are clearly labeled. A rumor must be a published claim; unsupported model inference is discarded.
 3. The Images API renders matched high-quality assembled and exhaustive exploded studio views in parallel, using portrait plates for strongly vertical subjects such as launch vehicles.
 4. A vision pass locates each researched part in the exploded image and attaches its source-backed record to a clickable hotspot. If visual generation or localization fails, the researched catalog still returns with a deterministic non-overlapping inventory fallback.
-5. The completed atlas and its image pair are stored under a normalized subject key in Vercel Blob. A repeated prompt is served from the shared gallery before any research or image generation runs.
+5. Direct power, data, thermal, fluid, mechanical, structural, and control relationships connect the returned component IDs. Selecting a component draws its connection map over the exploded plate and exposes navigable relationship cards in the detail panel.
+6. The completed atlas and its image pair are stored under a normalized subject key in Vercel Blob. A repeated prompt is served from the shared gallery before any research or image generation runs.
 
 The browser requests an NDJSON progress stream. Submission immediately scrolls to the workbench, where a quiet build journal reports cache lookup, research, the actual named sources returned by the research pass, component inventory size, both image renders, hotspot mapping, and the gallery save. These are operational milestones—not hidden model reasoning.
 

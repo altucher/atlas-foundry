@@ -19,6 +19,12 @@ export type AtlasSupplier = {
   note: string;
 };
 
+export type AtlasConnection = {
+  toPartId: string;
+  relationship: 'power' | 'data' | 'thermal' | 'fluid' | 'mechanical' | 'structural' | 'control' | 'other';
+  description: string;
+};
+
 export type AtlasPart = {
   id: string;
   name: string;
@@ -29,6 +35,7 @@ export type AtlasPart = {
   sourceUrls: string[];
   confidence: 'high' | 'medium' | 'contextual';
   suppliers?: AtlasSupplier[];
+  connections?: AtlasConnection[];
 };
 
 export type AtlasHotspot = {
