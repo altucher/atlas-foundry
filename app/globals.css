@@ -624,7 +624,7 @@ a { color: inherit; }
 .foundry-object-overview .overview-archive-note,
 .foundry-suppliers > span,
 .foundry-connections-list > span,
-.foundry-citations > span { color: #96988f; font-size: 8px; }
+.foundry-citations > span { color: #96988f; font-size: 9px; }
 
 .gallery-card-copy small,
 .gallery-card-copy em,
@@ -655,7 +655,7 @@ a { color: inherit; }
 .foundry-connections-list > button > i,
 .foundry-connections-list small,
 .foundry-citations small,
-.source-register a i { font-size: 8px; }
+.source-register a i { font-size: 9px; }
 
 .foundry-subject p,
 .foundry-mode strong,
@@ -664,7 +664,7 @@ a { color: inherit; }
 .supplier-audit > strong,
 .foundry-supplier strong,
 .foundry-connections-list strong,
-.source-register a { font-size: 9px; }
+.source-register a { font-size: 10px; }
 
 .foundry-system-list button,
 .foundry-object-overview .overview-instruction,
@@ -672,7 +672,20 @@ a { color: inherit; }
 .foundry-supplier > p,
 .foundry-suppliers > .supplier-disclaimer,
 .foundry-connections-list small,
-.foundry-citations small { color: #999b92; }
+.foundry-citations small { color: #999b92; font-size: 10px; }
+
+.foundry-layer-index > button,
+.foundry-system-list button,
+.vendor-index-list strong,
+.supplier-audit > strong,
+.foundry-supplier strong,
+.foundry-supplier a,
+.foundry-connections-list strong { font-size: 10px; }
+
+.supplier-audit > p,
+.foundry-supplier > p,
+.foundry-suppliers > .supplier-disclaimer,
+.foundry-connections-list small { font-size: 10px; line-height: 1.55; }
 
 .foundry-detail > p,
 .foundry-object-overview > p { color: #b2b2a8; font-size: 12px; }

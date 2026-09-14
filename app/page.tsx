@@ -86,9 +86,25 @@ type BuildJournalEntry = {
   message: string;
 };
 
+function pendingAtlas(subject: string): FoundryAtlas {
+  return {
+    subject,
+    subtitle: 'Research build in progress',
+    category: 'Pending source-backed classification',
+    summary: `Researching ${subject}, its component architecture, connections, and potential suppliers.`,
+    accuracyNote: 'This placeholder contains no component claims. It is replaced only when the requested subject finishes successfully.',
+    parts: [],
+    sources: [],
+    imageOrientation: 'landscape',
+    mode: 'generated',
+  };
+}
+
 export default function FoundryHome() {
   const compact = useCompactLayout();
   const workbenchRef = useRef<HTMLElement>(null);
+  const activeRequestRef = useRef(0);
+  const activeAbortRef = useRef<AbortController | null>(null);
   const [prompt, setPrompt] = useState('Tesla');
   const [atlas, setAtlas] = useState<FoundryAtlas>(TESLA_DEMO);
   const [explode, setExplode] = useState(0);
@@ -140,7 +156,7 @@ export default function FoundryHome() {
     [activeLayer, atlas.parts],
   );
   const visiblePartIds = useMemo(() => new Set(visibleParts.map((part) => part.id)), [visibleParts]);
-  const selectedPart = atlas.parts.find((part) => part.id === selectedId);
+  const selectedPart = visiblePartIds.has(selectedId) ? atlas.parts.find((part) => part.id === selectedId) : undefined;
   const auditedPartCount = atlas.parts.filter((part) => part.supplierResearch && part.supplierResearch.status !== 'incomplete').length;
   const sourcedPartCount = atlas.parts.filter((part) => part.suppliers?.length).length;
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
@@ -190,8 +206,29 @@ export default function FoundryHome() {
     setNotice(message);
   }
 
+  function openCuratedAtlas(nextAtlas: FoundryAtlas, message: string) {
+    activeAbortRef.current?.abort();
+    activeAbortRef.current = null;
+    activeRequestRef.current += 1;
+    setGenerating(false);
+    setPrompt(nextAtlas.subject);
+    loadAtlas(nextAtlas, message);
+  }
+
   async function generateAtlas(subject: string) {
+    activeAbortRef.current?.abort();
+    const abortController = new AbortController();
+    activeAbortRef.current = abortController;
+    const requestId = activeRequestRef.current + 1;
+    activeRequestRef.current = requestId;
     requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    setAtlas(pendingAtlas(subject));
+    setExplode(0);
+    setActiveLayer('All layers');
+    setActiveSystem('All systems');
+    setActiveVendor(null);
+    setPartQuery('');
+    setSelectedId('');
     setBuildSubject(subject);
     setBuildJournal([{ stage: 'request', message: `Preparing a source-backed build plan for ${subject}…` }]);
     setGenerating(true);
@@ -201,6 +238,7 @@ export default function FoundryHome() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
         body: JSON.stringify({ prompt: subject }),
+        signal: abortController.signal,
       });
       type AtlasPayload = { atlas?: FoundryAtlas; error?: string; code?: string; imageWarning?: string; cacheWarning?: string; cached?: boolean };
       let payload: AtlasPayload = {};
@@ -245,12 +283,23 @@ export default function FoundryHome() {
           : payload.cacheWarning
             ? `Research and rendering complete. ${payload.cacheWarning}`
             : 'Component, supplier/IP, rendering, and gallery research complete. Select any numbered component to inspect it.';
+      if (requestId !== activeRequestRef.current) return;
       loadAtlas(payload.atlas, completion);
       if (!payload.cached) void refreshGallery();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'The atlas could not be generated.');
+      if (requestId !== activeRequestRef.current) return;
+      const message = error instanceof Error ? error.message : 'The atlas could not be generated.';
+      setAtlas((current) => ({
+        ...current,
+        subtitle: 'Build did not complete',
+        summary: `${current.subject} remains the active request. ${message}`,
+      }));
+      setNotice(message);
     } finally {
-      setGenerating(false);
+      if (requestId === activeRequestRef.current) {
+        activeAbortRef.current = null;
+        setGenerating(false);
+      }
     }
   }
 
@@ -260,20 +309,41 @@ export default function FoundryHome() {
       await generateAtlas(item.subject);
       return;
     }
+    const requestId = activeRequestRef.current + 1;
+    activeRequestRef.current = requestId;
+    activeAbortRef.current?.abort();
+    const abortController = new AbortController();
+    activeAbortRef.current = abortController;
+    setPrompt(item.subject);
+    setAtlas(pendingAtlas(item.subject));
+    setExplode(0);
+    setActiveLayer('All layers');
+    setActiveSystem('All systems');
+    setActiveVendor(null);
+    setPartQuery('');
+    setSelectedId('');
     setBuildSubject(item.subject);
     setBuildJournal([{ stage: 'cache', message: 'Opening the finished atlas from the shared gallery…' }]);
     setGenerating(true);
     setNotice(`Opening ${item.subject} from the shared gallery…`);
     requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     try {
-      const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store' });
+      const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store', signal: abortController.signal });
       const payload = await response.json() as { atlas?: FoundryAtlas; error?: string };
+      if (requestId !== activeRequestRef.current) return;
       if (!response.ok || !payload.atlas) throw new Error(payload.error ?? 'That gallery atlas is temporarily unavailable.');
+      if (payload.atlas.cacheKey && payload.atlas.cacheKey !== item.cacheKey) {
+        throw new Error(`Gallery identity mismatch: expected ${item.subject}, so the returned record was not opened.`);
+      }
       loadAtlas(payload.atlas, 'Loaded instantly from the shared gallery. No research or rendering was needed.');
     } catch (error) {
+      if (requestId !== activeRequestRef.current) return;
       setNotice(error instanceof Error ? error.message : 'That gallery atlas is temporarily unavailable.');
     } finally {
-      setGenerating(false);
+      if (requestId === activeRequestRef.current) {
+        activeAbortRef.current = null;
+        setGenerating(false);
+      }
     }
   }
 
@@ -298,7 +368,7 @@ export default function FoundryHome() {
       return;
     }
     if (/\btesla\b/i.test(subject)) {
-      loadAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.');
+      openCuratedAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.');
       return;
     }
     await generateAtlas(subject);
@@ -347,7 +417,7 @@ export default function FoundryHome() {
           <small>{galleryLoading ? 'CHECKING ARCHIVE…' : `${gallery.length + 2} ATLASES AVAILABLE`}</small>
         </div>
         <div className="foundry-gallery-track">
-          <button type="button" className="foundry-gallery-card" onClick={() => loadAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.')}>
+          <button type="button" className="foundry-gallery-card" onClick={() => openCuratedAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.')}>
             <span className="gallery-image"><img src="/tesla-exploded-v2.jpg" alt="Exploded Tesla systems atlas" /></span>
             <span className="gallery-card-copy"><small>CURATED / ENGINEERED PRODUCT</small><strong>Tesla</strong><em>{TESLA_DEMO.parts.length} parts · {new Set(TESLA_DEMO.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.company))).size} vendors</em></span>
             <ChevronRight />
@@ -393,6 +463,7 @@ export default function FoundryHome() {
                     setActiveVendor(null);
                     setPartQuery('');
                     setSelectedId(atlas.parts.find((part) => (part.archiveLayer ?? 'Overview') === layer)?.id ?? '');
+                    if (layer !== 'Overview') setExplode(1);
                   }}>
                     <span>{layer}</span><small>{String(count).padStart(2, '0')}</small>
                   </button>
@@ -405,7 +476,11 @@ export default function FoundryHome() {
               const layerParts = activeLayer === 'All layers' ? atlas.parts : atlas.parts.filter((part) => (part.archiveLayer ?? 'Overview') === activeLayer);
               const count = system === 'All systems' ? layerParts.length : layerParts.filter((part) => part.system === system).length;
               return (
-                <button type="button" key={system} className={activeSystem === system && !activeVendor ? 'active' : ''} onClick={() => { setActiveSystem(system); setActiveVendor(null); }}>
+                <button type="button" key={system} className={activeSystem === system && !activeVendor ? 'active' : ''} onClick={() => {
+                  setActiveSystem(system);
+                  setActiveVendor(null);
+                  setSelectedId(system === 'All systems' ? '' : (layerParts.find((part) => part.system === system)?.id ?? ''));
+                }}>
                   <span>{system}</span><small>{String(count).padStart(2, '0')}</small>
                 </button>
               );
@@ -564,7 +639,7 @@ export default function FoundryHome() {
             </div>
           )}
           {!hasIllustratedExplosion && <div className="foundry-parts" aria-label="Clickable component inventory">
-            {inventoryLayoutParts.filter((part) => !visiblePartIds.has(part.id)).map((part, index) => {
+            {inventoryLayoutParts.filter((part) => !visiblePartIds.has(part.id)).map((part) => {
               const layoutIndex = inventoryLayoutParts.findIndex((candidate) => candidate.id === part.id);
               const target = targetPosition(layoutIndex, inventoryLayoutParts.length, compact);
               const left = 50 + (target.x - 50) * explosionSpread;

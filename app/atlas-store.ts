@@ -48,12 +48,19 @@ async function readAtlasUrl(url: string) {
 
 export async function loadCachedAtlas(cacheKey: string) {
   if (!hasSharedAtlasStore()) return null;
-  try {
-    const blob = await head(atlasPath(cacheKey));
-    return await readAtlasUrl(blob.url);
-  } catch {
-    return null;
+  const candidateKeys = cacheKey === 'falcon-9'
+    ? ['falcon-9', 'falcon-9-block-5-launch-vehicle']
+    : [cacheKey];
+  for (const candidateKey of candidateKeys) {
+    try {
+      const blob = await head(atlasPath(candidateKey));
+      const atlas = await readAtlasUrl(blob.url);
+      if (atlas) return atlas;
+    } catch {
+      // Continue through any known legacy keys before reporting a miss.
+    }
   }
+  return null;
 }
 
 function decodeDataImage(value: string) {

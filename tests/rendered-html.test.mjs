@@ -65,6 +65,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /Falcon 9 archive now contains/);
   assert.match(generationRoute, /atlas_image_quality/);
   assert.match(generationRoute, /ZERO intact or usable assembled copies/);
+  assert.match(generationRoute, /subjectMatchesRequest/);
+  assert.match(generationRoute, /Research identity mismatch/);
   assert.match(generationRoute, /retrying automatically/);
   assert.match(generationRoute, /forensic component-supply-chain researcher/);
   assert.match(generationRoute, /Supplier evidence pass/);
@@ -72,12 +74,18 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /const batchSize = 6/);
   assert.match(generationRoute, /ip-licensor/);
   assert.match(galleryRoute, /ATLAS_CACHE_ORIGIN/);
+  assert.match(galleryRoute, /'Cache-Control': 'no-store'/);
   assert.match(store, /@vercel\/blob/);
   assert.match(store, /cacheKeyForPrompt/);
   assert.match(store, /CURRENT_INTELLIGENCE_VERSION/);
   assert.match(store, /normalized === 'data-center' \|\| normalized === 'data-centers'/);
   assert.match(store, /normalized === 'falcon-9' \|\| normalized === 'spacex-falcon-9'/);
+  assert.match(store, /falcon-9-block-5-launch-vehicle/);
   assert.match(page, /scrollIntoView/);
+  assert.match(page, /pendingAtlas\(subject\)/);
+  assert.match(page, /Gallery identity mismatch/);
+  assert.match(page, /new AbortController\(\)/);
+  assert.match(page, /setAtlas\(pendingAtlas\(item.subject\)\)/);
   assert.match(page, /foundry-build-journal/);
   assert.match(page, /COMPONENT AUDIT/);
   assert.match(page, /Open evidence for/);

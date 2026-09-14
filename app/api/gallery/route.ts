@@ -24,7 +24,10 @@ export async function GET(request: Request) {
     const response = await fetch(remote, { cache: 'no-store' });
     return new Response(response.body, {
       status: response.status,
-      headers: { 'Content-Type': response.headers.get('Content-Type') ?? 'application/json' },
+      headers: {
+        'Content-Type': response.headers.get('Content-Type') ?? 'application/json',
+        'Cache-Control': 'no-store',
+      },
     });
   }
 
@@ -36,7 +39,7 @@ export async function GET(request: Request) {
       const atlas = await loadCachedAtlas(key || cacheKeyForPrompt(prompt ?? ''));
       if (!atlas) return NextResponse.json({ error: 'Atlas not found in the shared gallery.' }, { status: 404 });
       return NextResponse.json({ atlas, cached: true }, {
-        headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300' },
+        headers: { 'Cache-Control': 'no-store' },
       });
     }
     const items = await listGalleryAtlases();

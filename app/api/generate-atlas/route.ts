@@ -403,6 +403,21 @@ function archiveNameKey(value: string) {
   return value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function subjectMatchesRequest(requested: string, returned: string) {
+  const stopWords = new Set(['a', 'an', 'the', 'of', 'and', 'for', 'with', 'system', 'systems', 'component', 'components', 'atlas']);
+  const terms = (value: string) => new Set(value
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/\bnine\b/g, '9')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(/\s+/)
+    .filter((term) => term.length > 1 && !stopWords.has(term)));
+  const requestedTerms = terms(requested);
+  const returnedTerms = terms(returned);
+  if (!requestedTerms.size || !returnedTerms.size) return false;
+  return [...requestedTerms].some((term) => returnedTerms.has(term));
+}
+
 type ArchiveLayerDefinition = { readonly id: string; readonly label: string; readonly focus: string };
 
 function mergeArchiveLayers(
@@ -1166,6 +1181,9 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     }, report);
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
     const normalized = normalizeAtlas(rawAtlas);
+    if (!subjectMatchesRequest(prompt, normalized.subject)) {
+      throw new Error(`Research identity mismatch: requested ${prompt}, but the provider returned ${normalized.subject}. The mismatched record was rejected and was not saved.`);
+    }
     report({ stage: 'inventory', message: `Mapped ${normalized.parts.length} documented components across ${new Set(normalized.parts.map((part) => part.system)).size} systems.` });
     for (const source of normalized.sources) {
       report({ stage: 'source', message: `Source · ${source.publisher} — ${source.title}` });
