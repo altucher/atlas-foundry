@@ -877,10 +877,15 @@ async function deepenFalconNineArchive(
   existing: FoundryAtlas,
   report: ProgressReporter,
 ) {
+  let base = existing;
+  if (existing.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION) {
+    const upgraded = await enrichSuppliers(connection, normalizeAtlas({ ...existing, visualPrompt: '' }), report);
+    base = { ...upgraded, mode: 'generated', generatedAt: new Date().toISOString() };
+  }
   report({ stage: 'research', message: `Expanding Falcon 9 across ${falconNineDeepLayers.length} independent vehicle and mission layers…` });
   const settled = await Promise.allSettled(falconNineDeepLayers.map(async (layer) => ({
     layer,
-    atlas: await researchFalconNineLayer(connection, layer, existing, report),
+    atlas: await researchFalconNineLayer(connection, layer, base, report),
   })));
   const additions = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
   for (const result of settled) if (result.status === 'rejected') console.warn('Falcon 9 deep layer failed', result.reason);
@@ -888,7 +893,7 @@ async function deepenFalconNineArchive(
   if (additions.length !== falconNineDeepLayers.length) {
     report({ stage: 'research', message: `${additions.length}/${falconNineDeepLayers.length} Falcon 9 deep layers completed; preserving successful layers for the archive.` });
   }
-  const merged = mergeArchiveLayers(existing, additions, {
+  const merged = mergeArchiveLayers(base, additions, {
     canonicalKey: 'falcon-9',
     aliases: ['Falcon 9', 'Falcon Nine', 'SpaceX Falcon 9', 'SpaceX Falcon Nine'],
     idPrefix: 'f9',
@@ -1128,7 +1133,8 @@ export async function POST(request: Request) {
   requestWindows.set(clientId, recent);
 
   if (deepBuildKey) {
-    if (!cachedAtlas || cachedAtlas.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION) {
+    const missingRequiredBase = !cachedAtlas || (deepBuildKey === 'data-center' && cachedAtlas.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION);
+    if (missingRequiredBase) {
       return NextResponse.json({ error: `Build the current ${deepBuildKey === 'data-center' ? 'data-center' : 'Falcon 9'} overview before requesting deep archive layers.` }, { status: 409 });
     }
     try {

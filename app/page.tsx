@@ -304,11 +304,6 @@ export default function FoundryHome() {
   }
 
   async function openGalleryAtlas(item: AtlasGalleryItem) {
-    if (item.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION) {
-      setPrompt(item.subject);
-      await generateAtlas(item.subject);
-      return;
-    }
     const requestId = activeRequestRef.current + 1;
     activeRequestRef.current = requestId;
     activeAbortRef.current?.abort();
@@ -335,7 +330,9 @@ export default function FoundryHome() {
       if (payload.atlas.cacheKey && payload.atlas.cacheKey !== item.cacheKey) {
         throw new Error(`Gallery identity mismatch: expected ${item.subject}, so the returned record was not opened.`);
       }
-      loadAtlas(payload.atlas, 'Loaded instantly from the shared gallery. No research or rendering was needed.');
+      loadAtlas(payload.atlas, item.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION
+        ? 'Loaded instantly from the shared gallery. No research or rendering was needed.'
+        : 'Loaded the saved edition instantly. Its supplier intelligence can be upgraded without hiding this record.');
     } catch (error) {
       if (requestId !== activeRequestRef.current) return;
       setNotice(error instanceof Error ? error.message : 'That gallery atlas is temporarily unavailable.');
