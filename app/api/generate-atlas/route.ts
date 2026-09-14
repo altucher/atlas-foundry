@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { Agent, fetch as undiciFetch } from 'undici';
 
 import { cacheKeyForPrompt, loadCachedAtlas, saveAtlasToGallery } from '@/app/atlas-store';
 import type { AtlasHotspot, AtlasPart, AtlasSource, FoundryAtlas } from '@/app/foundry-data';
@@ -14,6 +15,11 @@ const defaultImageModel = 'gpt-image-2.5-flare';
 const requestWindows = new Map<string, number[]>();
 const windowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 3;
+const aiDispatcher = new Agent({
+  headersTimeout: 780_000,
+  bodyTimeout: 780_000,
+  connectTimeout: 30_000,
+});
 
 type ProgressStage = 'cache' | 'research' | 'source' | 'inventory' | 'render' | 'mapping' | 'save' | 'done';
 type ProgressReporter = (entry: { stage: ProgressStage; message: string }) => void;
@@ -265,7 +271,8 @@ async function generateImage(
   const modeDirection = mode === 'assembled'
     ? 'Show one complete, fully assembled object centered and intact. No cutaway, no exposed internals, and no floating or duplicated parts. Leave generous dark negative space around the silhouette.'
     : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. Keep the recognizable main shell or enclosing structure central. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
-  const response = await fetch(`${connection.baseUrl}/images/generations`, {
+  const response = await undiciFetch(`${connection.baseUrl}/images/generations`, {
+    dispatcher: aiDispatcher,
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -309,7 +316,8 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
     },
   } as const;
   const partList = parts.map((part) => `${part.id}: ${part.name}`).join('\n');
-  const response = await fetch(`${connection.baseUrl}/responses`, {
+  const response = await undiciFetch(`${connection.baseUrl}/responses`, {
+    dispatcher: aiDispatcher,
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -427,7 +435,8 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
 
   try {
     report({ stage: 'research', message: `Searching authoritative public sources for ${prompt}…` });
-    const researchResponse = await fetch(`${connection.baseUrl}/responses`, {
+    const researchResponse = await undiciFetch(`${connection.baseUrl}/responses`, {
+      dispatcher: aiDispatcher,
       method: 'POST',
       headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
