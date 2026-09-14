@@ -1102,7 +1102,13 @@ export async function POST(request: Request) {
   const run = async (report: ProgressReporter): Promise<Response> => {
   report({ stage: 'cache', message: 'Checking the shared gallery for a finished atlas…' });
   const promptCacheKey = cacheKeyForPrompt(prompt);
-  const cachedAtlas = await loadCachedAtlas(promptCacheKey);
+  const loadedCachedAtlas = await loadCachedAtlas(promptCacheKey);
+  const cachedAtlas = loadedCachedAtlas && subjectMatchesRequest(prompt, loadedCachedAtlas.subject)
+    ? loadedCachedAtlas
+    : null;
+  if (loadedCachedAtlas && !cachedAtlas) {
+    report({ stage: 'cache', message: `Rejected a mismatched saved record (${loadedCachedAtlas.subject}); rebuilding ${prompt} safely…` });
+  }
   const forceRefresh = request.headers.get('x-atlas-force-refresh') === '1';
   const deepBuildKey = request.headers.get('x-atlas-deep-build') === '1' && ['data-center', 'falcon-9'].includes(promptCacheKey)
     ? promptCacheKey
