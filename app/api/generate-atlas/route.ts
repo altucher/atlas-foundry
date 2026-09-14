@@ -494,7 +494,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
         model: connection.researchModel,
         instructions,
         input: `Build a component atlas for: ${prompt}`,
-        tools: [{ type: 'web_search', search_context_size: 'high' }],
+        tools: [{ type: 'web_search', search_context_size: 'medium' }],
         text: { format: { type: 'json_schema', name: 'component_atlas', strict: true, schema: atlasSchema } },
     }, report);
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
