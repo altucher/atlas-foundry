@@ -79,6 +79,8 @@ public/ATTRIBUTION.md         Anatomy data license and adaptation details
 
 The browser requests an NDJSON progress stream. Submission immediately scrolls to the workbench, where a quiet build journal reports cache lookup, research, the actual named sources returned by the research pass, component inventory size, both image renders, hotspot mapping, and the gallery save. These are operational milestones—not hidden model reasoning.
 
+The generation route requests an extended Fluid-compute window because a first-time 60-part infrastructure atlas can take longer than five minutes across research, two high-quality renders, and visual localization. The deployment plan must support the configured duration; completed subjects subsequently load from the shared gallery.
+
 The UI packs only the currently visible records, interpolating them from the assembled center into a responsive desktop or two-column mobile inventory. Search and system filters recompute the layout, so filtered parts do not leave gaps or overlap.
 
 The gallery is shared by all visitors to the canonical deployment. It is a cache of generated educational artifacts, not an assertion that all changing supplier relationships remain current forever; source and applicability notes remain visible on every saved record.

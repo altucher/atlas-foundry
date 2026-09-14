@@ -4,7 +4,10 @@ import { cacheKeyForPrompt, loadCachedAtlas, saveAtlasToGallery } from '@/app/at
 import type { AtlasHotspot, AtlasPart, AtlasSource, FoundryAtlas } from '@/app/foundry-data';
 
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+// Deep generic architectures can spend several minutes in source-backed research
+// before the matched image and hotspot passes begin. Vercel Pro/Enterprise Fluid
+// compute permits up to 800 seconds; deployments need a plan that accepts it.
+export const maxDuration = 800;
 
 const defaultResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
