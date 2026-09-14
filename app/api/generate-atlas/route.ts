@@ -568,6 +568,14 @@ function responseFailure(payload: Record<string, unknown>) {
   return `Research ended with status ${String(payload.status ?? 'unknown')}.`;
 }
 
+function researchConfigurationFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (/no credits remaining|insufficient[_ ]quota|billing quota|add credits/i.test(message)) return 'credits' as const;
+  if (/invalid api key|incorrect api key|authentication|unauthorized/i.test(message)) return 'authentication' as const;
+  if (/model.+(?:not found|does not exist|not available|not supported)/i.test(message)) return 'model' as const;
+  return null;
+}
+
 async function generateResearchInBackground(
   connection: AiConnection,
   body: Record<string, unknown>,
@@ -625,6 +633,7 @@ async function generateResearchWithFallback(
   try {
     return await generateResearchInBackground(connection, body, report, progress);
   } catch (firstError) {
+    if (researchConfigurationFailure(firstError)) throw firstError;
     const fallbackId = String(body.model ?? '').includes('terra') ? 'gpt-5.6-luna' : 'gpt-5.6-terra';
     const fallbackModel = connection.baseUrl === 'https://api.openai.com/v1' ? fallbackId : gatewayModel(fallbackId);
     const tools = Array.isArray(body.tools)
@@ -654,6 +663,7 @@ async function generateDraftResearchWithRecovery(
   try {
     return await generateResearchWithFallback(connection, body, report);
   } catch (secondError) {
+    if (researchConfigurationFailure(secondError)) throw secondError;
     const finalModel = connection.supplierResearchModel;
     const tools = Array.isArray(body.tools)
       ? body.tools.map((tool) => tool && typeof tool === 'object' && 'type' in tool && tool.type === 'web_search'
@@ -1364,6 +1374,19 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
   } catch (error) {
     console.error('Atlas generation failed', error);
     const message = error instanceof Error ? error.message : '';
+    const configurationFailure = researchConfigurationFailure(error);
+    if (configurationFailure === 'credits') {
+      return NextResponse.json({
+        code: 'CREDITS_EXHAUSTED',
+        error: 'Live generation is paused because the OpenAI API account connected to this site has no credits remaining. Add API credits in OpenAI Platform billing, then retry. Saved gallery atlases remain available.',
+      }, { status: 402 });
+    }
+    if (configurationFailure === 'authentication') {
+      return NextResponse.json({ code: 'AUTHENTICATION_FAILED', error: 'Live generation is paused because the server API key was rejected. Replace OPENAI_API_KEY in Vercel, then redeploy.' }, { status: 503 });
+    }
+    if (configurationFailure === 'model') {
+      return NextResponse.json({ code: 'MODEL_UNAVAILABLE', error: 'Live generation is paused because a configured research model is unavailable. Check the model names in the production environment.' }, { status: 503 });
+    }
     const errorMessage = message.startsWith('Research identity mismatch:')
       ? `${message} Please make the product or model name more specific.`
       : 'Three independent research attempts ended before a safe first draft could be completed. Nothing mismatched was saved; please retry in a few minutes.';

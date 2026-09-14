@@ -82,6 +82,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /generateDraftResearchWithRecovery/);
   assert.match(generationRoute, /Compact recovery research is still running/);
   assert.match(generationRoute, /canonicalResearchPrompt/);
+  assert.match(generationRoute, /CREDITS_EXHAUSTED/);
+  assert.match(generationRoute, /researchConfigurationFailure\(firstError\)/);
   assert.match(generationRoute, /forensic component-supply-chain researcher/);
   assert.match(generationRoute, /Supplier evidence pass/);
   assert.match(generationRoute, /Coverage is an audit ledger/);
