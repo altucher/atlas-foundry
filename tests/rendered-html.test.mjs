@@ -66,6 +66,7 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /atlas_image_quality/);
   assert.match(generationRoute, /ZERO intact or usable assembled copies/);
   assert.match(generationRoute, /subjectMatchesRequest/);
+  assert.match(generationRoute, /Math\.ceil\(requestedTerms\.size \* 0\.6\)/);
   assert.match(generationRoute, /Research identity mismatch/);
   assert.match(generationRoute, /retrying automatically/);
   assert.match(generationRoute, /forensic component-supply-chain researcher/);

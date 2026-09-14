@@ -415,7 +415,11 @@ function subjectMatchesRequest(requested: string, returned: string) {
   const requestedTerms = terms(requested);
   const returnedTerms = terms(returned);
   if (!requestedTerms.size || !returnedTerms.size) return false;
-  return [...requestedTerms].some((term) => returnedTerms.has(term));
+  const sharedTerms = [...requestedTerms].filter((term) => returnedTerms.has(term));
+  // A single coincidental token (a model number such as "787", for example)
+  // must never be enough to turn a Boeing request into a different product.
+  const requiredMatches = requestedTerms.size === 1 ? 1 : Math.ceil(requestedTerms.size * 0.6);
+  return sharedTerms.length >= requiredMatches;
 }
 
 type ArchiveLayerDefinition = { readonly id: string; readonly label: string; readonly focus: string };
