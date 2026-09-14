@@ -96,3 +96,29 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /RESEARCH REFRESH/);
   assert.match(page, /foundry-connection-lines/);
 });
+
+test("ships encrypted, private analytics without exposing the admin secret", async () => {
+  const [layout, page, analytics, tracker, dashboard, styles] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/analytics.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/analytics-client.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/analytics/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(layout, /<AnalyticsClient/);
+  assert.match(page, /query_submit/);
+  assert.match(page, /component_select/);
+  assert.match(page, /vendor_select/);
+  assert.match(tracker, /page_view/);
+  assert.match(tracker, /document\.addEventListener\('click'/);
+  assert.match(analytics, /aes-256-gcm/);
+  assert.match(analytics, /ANALYTICS_ADMIN_PASSWORD/);
+  assert.doesNotMatch(tracker, /ANALYTICS_ADMIN_PASSWORD/);
+  assert.match(dashboard, /validAdminCookie/);
+  assert.match(dashboard, /Exact submitted text/);
+  assert.match(dashboard, /No names or raw IP addresses are stored/);
+  assert.match(styles, /foundry-assembly\.rich-assembled \{[^}]*aspect-ratio: 16 \/ 9/);
+  assert.match(styles, /foundry-assembly\.rich-assembled img \{[^}]*height: 100%/);
+});

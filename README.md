@@ -125,3 +125,7 @@ Prepared browser assets and portions of the human rendering/data-pipeline implem
 ## Disclaimer
 
 Atlas Foundry is educational. Generated atlases are not engineering, repair, safety, legal, or clinical tools. The human edition is not a diagnostic, surgical-planning, or medical-decision tool and represents one adult male reference anatomy rather than individual variation.
+
+## Private analytics
+
+Set the server-only `ANALYTICS_ADMIN_PASSWORD` environment variable to enable anonymous product analytics and the password-protected `/analytics` dashboard. The dashboard reports page views, random browser visitors and sessions, exact submitted atlas queries, build outcomes, gallery opens, component/vendor/filter/explosion activity, click targets, devices, and coarse Vercel location headers. It never stores names or raw IP addresses. Event payloads are AES-256-GCM encrypted before being written to the existing Blob store; the admin password is required to decrypt them. Changing that password makes previously collected events unreadable, so rotate it deliberately.

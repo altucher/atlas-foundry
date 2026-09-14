@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { CURRENT_INTELLIGENCE_VERSION, TESLA_DEMO, type AtlasGalleryItem, type AtlasPart, type FoundryAtlas } from './foundry-data';
+import { trackAnalytics } from './analytics-client';
 
 const examples = ['data center', 'Falcon 9', 'Tesla', 'espresso machine', 'a male human body'];
 
@@ -120,6 +121,7 @@ export default function FoundryHome() {
   const [buildSubject, setBuildSubject] = useState('');
   const [buildJournal, setBuildJournal] = useState<BuildJournalEntry[]>([]);
   const [notice, setNotice] = useState('');
+  const lastExplosionEventRef = useRef(-1);
 
   const archiveLayers = useMemo(() => atlas.archive?.layers.map((layer) => layer.label) ?? [], [atlas.archive]);
   const systems = useMemo(() => {
@@ -194,6 +196,16 @@ export default function FoundryHome() {
       .finally(() => setGalleryLoading(false));
   }, []);
 
+  useEffect(() => {
+    const rounded = Math.round(explode * 10) * 10;
+    if (rounded === lastExplosionEventRef.current) return;
+    const timeout = window.setTimeout(() => {
+      lastExplosionEventRef.current = rounded;
+      trackAnalytics('explosion_change', { atlas: atlas.subject, amount: rounded, layer: activeLayer });
+    }, 600);
+    return () => window.clearTimeout(timeout);
+  }, [activeLayer, atlas.subject, explode]);
+
   function loadAtlas(nextAtlas: FoundryAtlas, message: string) {
     setAtlas(nextAtlas);
     setExplode(0);
@@ -212,6 +224,7 @@ export default function FoundryHome() {
     activeRequestRef.current += 1;
     setGenerating(false);
     setPrompt(nextAtlas.subject);
+    trackAnalytics('gallery_open', { atlas: nextAtlas.subject, source: 'curated' });
     loadAtlas(nextAtlas, message);
   }
 
@@ -286,6 +299,7 @@ export default function FoundryHome() {
             : 'Component, supplier/IP, rendering, and gallery research complete. Select any numbered component to inspect it.';
       if (requestId !== activeRequestRef.current) return;
       loadAtlas(payload.atlas, completion);
+      trackAnalytics('atlas_result', { query: subject, atlas: payload.atlas.subject, status: 'success', cached: Boolean(payload.cached) });
       if (!payload.cached) void refreshGallery();
     } catch (error) {
       if (requestId !== activeRequestRef.current) return;
@@ -296,6 +310,7 @@ export default function FoundryHome() {
         summary: `${current.subject} remains the active request. ${message}`,
       }));
       setNotice(message);
+      trackAnalytics('atlas_result', { query: subject, status: 'failed', error: message });
     } finally {
       if (requestId === activeRequestRef.current) {
         activeAbortRef.current = null;
@@ -322,6 +337,7 @@ export default function FoundryHome() {
     setBuildJournal([{ stage: 'cache', message: 'Opening the finished atlas from the shared gallery…' }]);
     setGenerating(true);
     setNotice(`Opening ${item.subject} from the shared gallery…`);
+    trackAnalytics('gallery_open', { atlas: item.subject, cacheKey: item.cacheKey, source: 'shared' });
     requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     try {
       const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store', signal: abortController.signal });
@@ -347,6 +363,7 @@ export default function FoundryHome() {
 
   function chooseVendor(vendor: VendorEntry) {
     const nextVendor = activeVendor === vendor.company ? null : vendor.company;
+    trackAnalytics('vendor_select', { atlas: atlas.subject, vendor: vendor.company, selected: Boolean(nextVendor) });
     setActiveVendor(nextVendor);
     setActiveLayer('All layers');
     setActiveSystem('All systems');
@@ -361,11 +378,14 @@ export default function FoundryHome() {
     event.preventDefault();
     const subject = prompt.trim();
     if (!subject || generating) return;
+    trackAnalytics('query_submit', { query: subject });
     if (/\b(human|anatomy|bodyparts3d)\b/i.test(subject)) {
+      trackAnalytics('atlas_result', { query: subject, atlas: 'Adult male anatomy', status: 'success', cached: true });
       window.location.assign('/human');
       return;
     }
     if (/\btesla\b/i.test(subject)) {
+      trackAnalytics('atlas_result', { query: subject, atlas: 'Tesla', status: 'success', cached: true });
       openCuratedAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.');
       return;
     }
@@ -456,6 +476,7 @@ export default function FoundryHome() {
                 const count = atlas.parts.filter((part) => (part.archiveLayer ?? 'Overview') === layer).length;
                 return (
                   <button type="button" key={layer} className={activeLayer === layer && !activeVendor ? 'active' : ''} onClick={() => {
+                    trackAnalytics('filter_change', { atlas: atlas.subject, filter: 'layer', value: layer });
                     setActiveLayer(layer);
                     setActiveSystem('All systems');
                     setActiveVendor(null);
@@ -475,6 +496,7 @@ export default function FoundryHome() {
               const count = system === 'All systems' ? layerParts.length : layerParts.filter((part) => part.system === system).length;
               return (
                 <button type="button" key={system} className={activeSystem === system && !activeVendor ? 'active' : ''} onClick={() => {
+                  trackAnalytics('filter_change', { atlas: atlas.subject, filter: 'system', value: system });
                   setActiveSystem(system);
                   setActiveVendor(null);
                   setSelectedId(system === 'All systems' ? '' : (layerParts.find((part) => part.system === system)?.id ?? ''));
@@ -624,7 +646,7 @@ export default function FoundryHome() {
                         '--part-color': part.color,
                       } as CSSProperties}
                       disabled={explode < 0.12}
-                      onClick={() => setSelectedId(part.id)}
+                      onClick={() => { setSelectedId(part.id); trackAnalytics('component_select', { atlas: atlas.subject, component: part.name, componentId: part.id, surface: 'exploded-image' }); }}
                       aria-label={`Select ${part.name}${part.suppliers?.length ? `, with ${part.suppliers.length} supplier ${part.suppliers.length === 1 ? 'record' : 'records'}` : ''}`}
                       aria-pressed={active}
                     >
@@ -667,7 +689,7 @@ export default function FoundryHome() {
                   className={`foundry-part-node${active ? ' active' : ''}`}
                   style={{ left: `${left}%`, top: `${top}%`, opacity: Math.min(1, Math.max(0, (explode - 0.08) * 2.5)), '--part-color': part.color } as CSSProperties}
                   disabled={explode < 0.12}
-                  onClick={() => setSelectedId(part.id)}
+                  onClick={() => { setSelectedId(part.id); trackAnalytics('component_select', { atlas: atlas.subject, component: part.name, componentId: part.id, surface: 'inventory' }); }}
                 >
                   <i>{String(layoutIndex + 1).padStart(2, '0')}</i>
                   <span><strong>{part.name}</strong><small>{supplierSummary(part) || part.system}</small></span>
@@ -731,7 +753,7 @@ export default function FoundryHome() {
                 <div className="foundry-connections-list">
                   <span>CONNECTIONS / POWER · DATA · THERMAL · PHYSICAL</span>
                   {selectedConnections.map(({ connection, part }) => (
-                    <button type="button" key={`${connection.toPartId}-${connection.relationship}`} onClick={() => { setSelectedId(part.id); setActiveLayer(part.archiveLayer ?? 'Overview'); setActiveSystem('All systems'); setActiveVendor(null); setPartQuery(''); setExplode((amount) => Math.max(amount, 0.72)); }}>
+                    <button type="button" key={`${connection.toPartId}-${connection.relationship}`} onClick={() => { setSelectedId(part.id); setActiveLayer(part.archiveLayer ?? 'Overview'); setActiveSystem('All systems'); setActiveVendor(null); setPartQuery(''); setExplode((amount) => Math.max(amount, 0.72)); trackAnalytics('component_select', { atlas: atlas.subject, component: part.name, componentId: part.id, surface: 'connection' }); }}>
                       <i className={`connection-${connection.relationship}`}>{connection.relationship}</i>
                       <span><strong>{part.name}</strong><small>{connection.description}</small></span>
                       <ChevronRight />
