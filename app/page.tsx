@@ -859,7 +859,7 @@ export default function FoundryHome() {
         <div className="trailer-modal" role="presentation" onClick={() => setTrailerOpen(false)}>
           <section className="trailer-dialog" role="dialog" aria-modal="true" aria-label="Explode Anything trailer" onClick={(event) => event.stopPropagation()}>
             <div className="trailer-dialog-head"><span>EXPLODE ANYTHING / 27 SECOND TOUR</span><button type="button" onClick={() => setTrailerOpen(false)} aria-label="Close trailer"><X /></button></div>
-            <video src="/video/explode-anything-trailer.mp4" controls autoPlay playsInline preload="metadata" poster="/video/trailer-poster.jpg" />
+            <video src="/video/explode-anything-trailer.mp4?v=2" controls autoPlay playsInline preload="metadata" poster="/video/trailer-poster.jpg?v=2" />
           </section>
         </div>
       ) : null}
