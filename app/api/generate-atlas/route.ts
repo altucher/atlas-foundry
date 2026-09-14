@@ -10,9 +10,11 @@ export const runtime = 'nodejs';
 // compute permits up to 800 seconds; deployments need a plan that accepts it.
 export const maxDuration = 800;
 
-// Terra retains flagship-class web research and structured output while staying
-// inside the gateway's upstream response window for 36–60 part architectures.
-const defaultResearchModel = 'gpt-5.6-terra';
+// Luna makes the first useful atlas arrive quickly. Deeper archive passes retain
+// Terra, and the forensic named-product supplier audit retains Astra.
+const defaultResearchModel = 'gpt-5.6-luna';
+const defaultDeepResearchModel = 'gpt-5.6-terra';
+const defaultInitialSupplierResearchModel = 'gpt-5.6-terra';
 const defaultSupplierResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
 const requestWindows = new Map<string, number[]>();
@@ -96,6 +98,8 @@ type AiConnection = {
   apiKey: string;
   baseUrl: string;
   researchModel: string;
+  deepResearchModel: string;
+  initialSupplierResearchModel: string;
   supplierResearchModel: string;
   imageModel: string;
 };
@@ -110,6 +114,8 @@ function directOpenAiModel(model: string) {
 
 function getAiConnection(request: Request): AiConnection | null {
   const configuredResearchModel = process.env.OPENAI_RESEARCH_MODEL ?? defaultResearchModel;
+  const configuredDeepResearchModel = process.env.OPENAI_DEEP_RESEARCH_MODEL ?? defaultDeepResearchModel;
+  const configuredInitialSupplierResearchModel = process.env.OPENAI_INITIAL_SUPPLIER_RESEARCH_MODEL ?? defaultInitialSupplierResearchModel;
   const configuredSupplierResearchModel = process.env.OPENAI_SUPPLIER_RESEARCH_MODEL ?? defaultSupplierResearchModel;
   const configuredImageModel = process.env.OPENAI_IMAGE_MODEL ?? defaultImageModel;
   const directApiKey = process.env.OPENAI_API_KEY;
@@ -119,6 +125,8 @@ function getAiConnection(request: Request): AiConnection | null {
       apiKey: directApiKey,
       baseUrl: 'https://api.openai.com/v1',
       researchModel: directOpenAiModel(configuredResearchModel),
+      deepResearchModel: directOpenAiModel(configuredDeepResearchModel),
+      initialSupplierResearchModel: directOpenAiModel(configuredInitialSupplierResearchModel),
       supplierResearchModel: directOpenAiModel(configuredSupplierResearchModel),
       imageModel: directOpenAiModel(configuredImageModel),
     };
@@ -132,6 +140,8 @@ function getAiConnection(request: Request): AiConnection | null {
       apiKey: gatewayCredential,
       baseUrl: 'https://ai-gateway.vercel.sh/v1',
       researchModel: gatewayModel(configuredResearchModel),
+      deepResearchModel: gatewayModel(configuredDeepResearchModel),
+      initialSupplierResearchModel: gatewayModel(configuredInitialSupplierResearchModel),
       supplierResearchModel: gatewayModel(configuredSupplierResearchModel),
       imageModel: gatewayModel(configuredImageModel),
     };
@@ -748,7 +758,7 @@ Capture readily established component suppliers and IP roles, including multiple
 Return a concise accuracy boundary and an image prompt, although this archive-deepening pass will reuse the canonical overview images. Do not provide construction procedures, hazardous electrical instructions, or operating setpoints.`;
   report({ stage: 'research', message: `Deep archive layer · ${layer.label} — decomposing documented subassemblies…` });
   const payload = await generateResearchWithFallback(connection, {
-    model: connection.researchModel,
+    model: connection.deepResearchModel,
     reasoning: { effort: 'low' },
     instructions,
     input: `Canonical subject: a data center\nDeep layer: ${layer.label}\n\nExisting archive records to avoid duplicating:\n${existingNames}`,
@@ -767,7 +777,7 @@ Return a concise accuracy boundary and an image prompt, although this archive-de
   report({ stage: 'inventory', message: `${layer.label} layer mapped ${layered.parts.length} lower-level components.` });
   // Terra was exceptionally strong for generic market alternatives in the
   // overview audit; reserve Astra for opaque named-product supply chains.
-  const genericSupplierConnection = { ...connection, supplierResearchModel: connection.researchModel };
+  const genericSupplierConnection = { ...connection, supplierResearchModel: connection.deepResearchModel };
   const enriched = await enrichSuppliers(genericSupplierConnection, layered, report);
   return { ...enriched, mode: 'generated', generatedAt: layered.generatedAt } satisfies FoundryAtlas;
 }
@@ -826,7 +836,7 @@ Audit the public supply chain as part of the architecture: retain SpaceX only fo
 Return a concise accuracy boundary and an image prompt, although this deepening pass reuses the canonical overview images. Do not provide hazardous propellant procedures, launch parameters, exploit-relevant software details, or step-by-step construction instructions.`;
   report({ stage: 'research', message: `Deep Falcon 9 layer · ${layer.label} — decomposing documented subassemblies…` });
   const payload = await generateResearchWithFallback(connection, {
-    model: connection.researchModel,
+    model: connection.deepResearchModel,
     reasoning: { effort: 'low' },
     instructions,
     input: `Canonical subject: SpaceX Falcon 9\nDeep layer: ${layer.label}\n\nExisting archive records to avoid duplicating:\n${existingNames}`,
@@ -1114,8 +1124,8 @@ export async function POST(request: Request) {
         atlas,
         cached: false,
         deepened: true,
-        researchModel: connection.researchModel,
-        supplierResearchModel: connection.researchModel,
+        researchModel: connection.deepResearchModel,
+        supplierResearchModel: deepBuildKey === 'data-center' ? connection.deepResearchModel : connection.supplierResearchModel,
         imageModel: connection.imageModel,
       });
     } catch (error) {
@@ -1148,10 +1158,10 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     report({ stage: 'research', message: `Searching authoritative public sources for ${prompt}…` });
     const responsePayload = await generateResearchWithFallback(connection, {
         model: connection.researchModel,
-        reasoning: { effort: 'low' },
+        reasoning: { effort: 'none' },
         instructions,
         input: `Build a component atlas for: ${prompt}`,
-        tools: [{ type: 'web_search', search_context_size: 'medium' }],
+        tools: [{ type: 'web_search', search_context_size: 'low' }],
         text: { format: { type: 'json_schema', name: 'component_atlas', strict: true, schema: atlasSchema } },
     }, report);
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
@@ -1162,7 +1172,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     }
     report({ stage: 'render', message: 'Rendering a matched photorealistic assembled and exploded image pair…' });
     const [enriched, imageResults] = await Promise.all([
-      enrichSuppliers(connection, normalized, report).catch((error) => {
+      enrichSuppliers({ ...connection, supplierResearchModel: connection.initialSupplierResearchModel }, normalized, report).catch((error) => {
         console.warn('Dedicated supplier evidence pass failed', error);
         report({ stage: 'vendor', message: 'The dedicated supplier pass was incomplete; retaining relationships established by the architecture research.' });
         return normalized;
@@ -1224,7 +1234,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       imageWarning,
       cacheWarning,
       researchModel: connection.researchModel,
-      supplierResearchModel: connection.supplierResearchModel,
+      supplierResearchModel: connection.initialSupplierResearchModel,
       imageModel: connection.imageModel,
     });
   } catch (error) {
