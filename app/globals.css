@@ -370,10 +370,14 @@ a { color: inherit; }
 .axis-y { top: 8%; bottom: 5%; left: 50%; width: 1px; }
 .axis-y::before { left: -2px; top: 0; }.axis-y::after { left: -2px; bottom: 0; }
 .foundry-parts { position: absolute; z-index: 4; inset: 48px 18px 118px; pointer-events: none; }
-.foundry-exploded-visual { position: absolute; z-index: 3; left: 50%; top: 48%; width: min(96%, 940px); aspect-ratio: 3 / 2; transform: translate(-50%, -50%); transition: opacity .12s linear, transform .12s linear; pointer-events: none; }
-.foundry-exploded-visual > img { display: block; width: 100%; height: 100%; border: 1px solid #e6dcc819; object-fit: contain; box-shadow: 0 34px 80px #0008; }
-.foundry-art-badge { position: absolute; left: 13px; bottom: 11px; padding: 5px 7px; border: 1px solid #e9dfcc28; background: #0b0c09d9; color: #9a978d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .13em; }
-.foundry-hotspots { position: absolute; inset: 0; pointer-events: none; }
+.foundry-exploded-visual { position: absolute; z-index: 3; left: 50%; top: 48%; width: min(96%, 940px); aspect-ratio: 3 / 2; transform: translate(-50%, -50%); transition: transform .08s linear; pointer-events: none; }
+.foundry-exploded-base, .foundry-part-layer img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.foundry-exploded-base { position: absolute; inset: 0; z-index: 0; border: 1px solid #e6dcc819; box-shadow: 0 34px 80px #0008; transition: opacity .08s linear; }
+.foundry-part-layers { position: absolute; z-index: 1; inset: 0; overflow: visible; pointer-events: none; }
+.foundry-part-layer { position: absolute; inset: 0; will-change: transform, opacity; filter: drop-shadow(0 12px 18px #0009); }
+.foundry-part-layer.active { filter: brightness(1.13) saturate(1.08) drop-shadow(0 13px 22px #000c); }
+.foundry-art-badge { position: absolute; z-index: 4; left: 13px; bottom: 11px; padding: 5px 7px; border: 1px solid #e9dfcc28; background: #0b0c09d9; color: #9a978d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .13em; transition: opacity .08s linear; }
+.foundry-hotspots { position: absolute; z-index: 5; inset: 0; pointer-events: none; transition: opacity .08s linear; }
 .foundry-hotspot { --part-color: #b9aa89; position: absolute; min-width: 32px; min-height: 32px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--part-color); transform: translate(-50%, -50%); pointer-events: auto; cursor: crosshair; transition: border-color .16s, background .16s, box-shadow .16s; }
 .foundry-hotspot::after { content: ""; position: absolute; inset: 0; border: 1px dashed color-mix(in srgb, var(--part-color), transparent 40%); border-radius: inherit; opacity: 0; transition: opacity .16s; }
 .foundry-hotspot > i { position: absolute; left: 50%; top: 50%; width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--part-color), #fff 35%); border-radius: 50%; background: #0c0d0be8; box-shadow: 0 0 0 4px #0809078c, 0 7px 18px #000b; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; font-style: normal; transform: translate(-50%, -50%); }

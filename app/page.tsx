@@ -74,6 +74,7 @@ export default function FoundryHome() {
   const selectedPart = atlas.parts.find((part) => part.id === selectedId) ?? visibleParts[0] ?? atlas.parts[0];
   const selectedSources = selectedPart ? sourceForPart(atlas, selectedPart) : [];
   const hasIllustratedExplosion = Boolean(atlas.explodedImage);
+  const showingEveryPart = visibleParts.length === atlas.parts.length;
 
   useEffect(() => {
     if (!visibleParts.some((part) => part.id === selectedId) && visibleParts[0]) setSelectedId(visibleParts[0].id);
@@ -198,7 +199,7 @@ export default function FoundryHome() {
           <div
             className={`foundry-assembly${hasIllustratedExplosion ? ' rich-assembled' : ''}`}
             style={{
-              opacity: hasIllustratedExplosion ? Math.max(0, 1 - explode * 1.9) : Math.max(0.12, 1 - explode * 0.9),
+              opacity: hasIllustratedExplosion ? Math.max(0, 1 - explode * 1.45) : Math.max(0.12, 1 - explode * 0.9),
               transform: `translate(-50%, -50%) scale(${1 - explode * (hasIllustratedExplosion ? 0.06 : 0.16)})`,
             }}
           >
@@ -209,13 +210,49 @@ export default function FoundryHome() {
             <div
               className="foundry-exploded-visual"
               style={{
-                opacity: Math.max(0, Math.min(1, explode * 1.75)),
-                transform: `translate(-50%, -50%) scale(${0.93 + explode * 0.07})`,
+                transform: `translate(-50%, -50%) scale(${0.97 + explode * 0.03})`,
               }}
             >
-              <img src={atlas.explodedImage} alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`} />
-              <span className="foundry-art-badge">AI-ILLUSTRATED · DOCUMENTED SYSTEMS · NOT SERVICE GEOMETRY</span>
-              <div className="foundry-hotspots" aria-label="Clickable component regions">
+              <img
+                className="foundry-exploded-base"
+                src={atlas.explodedImage}
+                alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`}
+                style={{ opacity: showingEveryPart ? Math.max(0, Math.min(1, (explode - 0.82) / 0.18)) : 0 }}
+              />
+              <div className="foundry-part-layers" aria-hidden="true">
+                {visibleParts.flatMap((part) => {
+                  const hotspot = atlas.hotspots?.[part.id];
+                  if (!hotspot) return [];
+                  const regions = Array.isArray(hotspot) ? hotspot : [hotspot];
+                  const active = part.id === selectedPart?.id;
+                  return regions.map((region, regionIndex) => {
+                    const width = region.width ?? 9;
+                    const height = region.height ?? 9;
+                    const top = Math.max(0, region.y - height / 2);
+                    const right = Math.max(0, 100 - region.x - width / 2);
+                    const bottom = Math.max(0, 100 - region.y - height / 2);
+                    const left = Math.max(0, region.x - width / 2);
+                    const shiftX = (50 - region.x) * (1 - explode);
+                    const shiftY = (46 - region.y) * (1 - explode);
+                    return (
+                      <div
+                        key={`${part.id}-layer-${regionIndex}`}
+                        className={`foundry-part-layer${active ? ' active' : ''}`}
+                        style={{
+                          clipPath: `inset(${top}% ${right}% ${bottom}% ${left}% round 4%)`,
+                          opacity: Math.max(0, Math.min(1, (explode - 0.03) * 1.85)),
+                          transform: `translate(${shiftX}%, ${shiftY}%) scale(${0.48 + explode * 0.52})`,
+                          transformOrigin: `${region.x}% ${region.y}%`,
+                        }}
+                      >
+                        <img src={atlas.explodedImage} alt="" />
+                      </div>
+                    );
+                  });
+                })}
+              </div>
+              <span className="foundry-art-badge" style={{ opacity: Math.max(0, Math.min(1, (explode - 0.16) * 3)) }}>AI-ILLUSTRATED · DOCUMENTED SYSTEMS · NOT SERVICE GEOMETRY</span>
+              <div className="foundry-hotspots" aria-label="Clickable component regions" style={{ opacity: Math.max(0, Math.min(1, (explode - 0.12) * 4)) }}>
                 {visibleParts.flatMap((part) => {
                   const hotspot = atlas.hotspots?.[part.id];
                   if (!hotspot) return [];
@@ -228,13 +265,13 @@ export default function FoundryHome() {
                       key={`${part.id}-${regionIndex}`}
                       className={`foundry-hotspot${active ? ' active' : ''}`}
                       style={{
-                        left: `${region.x}%`,
-                        top: `${region.y}%`,
-                        width: `${region.width ?? 9}%`,
-                        height: `${region.height ?? 9}%`,
+                        left: `${50 + (region.x - 50) * explode}%`,
+                        top: `${46 + (region.y - 46) * explode}%`,
+                        width: `${(region.width ?? 9) * (0.48 + explode * 0.52)}%`,
+                        height: `${(region.height ?? 9) * (0.48 + explode * 0.52)}%`,
                         '--part-color': part.color,
                       } as CSSProperties}
-                      disabled={explode < 0.22}
+                      disabled={explode < 0.12}
                       onClick={() => setSelectedId(part.id)}
                       aria-label={`Select ${part.name}`}
                       aria-pressed={active}
