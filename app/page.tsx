@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -70,8 +70,14 @@ type VendorEntry = {
   partIds: string[];
 };
 
+type BuildJournalEntry = {
+  stage: string;
+  message: string;
+};
+
 export default function FoundryHome() {
   const compact = useCompactLayout();
+  const workbenchRef = useRef<HTMLElement>(null);
   const [prompt, setPrompt] = useState('Tesla');
   const [atlas, setAtlas] = useState<FoundryAtlas>(TESLA_DEMO);
   const [explode, setExplode] = useState(0);
@@ -83,6 +89,8 @@ export default function FoundryHome() {
   const [gallery, setGallery] = useState<AtlasGalleryItem[]>([]);
   const [galleryLoading, setGalleryLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [buildSubject, setBuildSubject] = useState('');
+  const [buildJournal, setBuildJournal] = useState<BuildJournalEntry[]>([]);
   const [notice, setNotice] = useState('');
 
   const systems = useMemo(() => ['All systems', ...Array.from(new Set(atlas.parts.map((part) => part.system)))], [atlas]);
@@ -146,8 +154,11 @@ export default function FoundryHome() {
   }
 
   async function openGalleryAtlas(item: AtlasGalleryItem) {
+    setBuildSubject(item.subject);
+    setBuildJournal([{ stage: 'cache', message: 'Opening the finished atlas from the shared gallery…' }]);
     setGenerating(true);
     setNotice(`Opening ${item.subject} from the shared gallery…`);
+    requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     try {
       const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store' });
       const payload = await response.json() as { atlas?: FoundryAtlas; error?: string };
@@ -175,6 +186,7 @@ export default function FoundryHome() {
     event.preventDefault();
     const subject = prompt.trim();
     if (!subject || generating) return;
+    requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     if (/\b(human|anatomy|bodyparts3d)\b/i.test(subject)) {
       window.location.assign('/human');
       return;
@@ -183,16 +195,47 @@ export default function FoundryHome() {
       loadAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.');
       return;
     }
+    setBuildSubject(subject);
+    setBuildJournal([{ stage: 'request', message: `Preparing a source-backed build plan for ${subject}…` }]);
     setGenerating(true);
     setNotice('Building the deepest source-backed inventory available, then rendering a matched photorealistic assembled and exploded pair…');
     try {
       const response = await fetch('/api/generate-atlas', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
         body: JSON.stringify({ prompt: subject }),
       });
-      const payload = (await response.json()) as { atlas?: FoundryAtlas; error?: string; code?: string; imageWarning?: string; cacheWarning?: string; cached?: boolean };
-      if (!response.ok || !payload.atlas) {
+      type AtlasPayload = { atlas?: FoundryAtlas; error?: string; code?: string; imageWarning?: string; cacheWarning?: string; cached?: boolean };
+      let payload: AtlasPayload = {};
+      let resultStatus = response.status;
+      if (response.headers.get('content-type')?.includes('application/x-ndjson') && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const processLine = (line: string) => {
+          if (!line.trim()) return;
+          const event = JSON.parse(line) as { type?: string; stage?: string; message?: string; status?: number; payload?: AtlasPayload };
+          if (event.type === 'progress' && event.message) {
+            setBuildJournal((entries) => [...entries, { stage: event.stage ?? 'build', message: event.message! }].slice(-14));
+          }
+          if (event.type === 'result') {
+            payload = event.payload ?? {};
+            resultStatus = event.status ?? resultStatus;
+          }
+        };
+        while (true) {
+          const { done, value } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+          for (const line of lines) processLine(line);
+          if (done) break;
+        }
+        processLine(buffer);
+      } else {
+        payload = await response.json() as AtlasPayload;
+      }
+      if (resultStatus < 200 || resultStatus >= 300 || !payload.atlas) {
         if (payload.code === 'NOT_CONFIGURED') {
           throw new Error('Live generation needs an OPENAI_API_KEY on the server. The curated Tesla and verified human atlases are ready to show now.');
         }
@@ -279,7 +322,7 @@ export default function FoundryHome() {
         </div>
       </section>
 
-      <section className="foundry-workbench" aria-label={`${atlas.subject} component atlas`}>
+      <section ref={workbenchRef} className="foundry-workbench" aria-label={`${atlas.subject} component atlas`}>
         <aside className="foundry-index">
           <div className="foundry-section-number">01 / INDEX</div>
           <div className="foundry-subject">
@@ -328,6 +371,19 @@ export default function FoundryHome() {
             <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
           </div>
           <div className="foundry-stage-grid" aria-hidden="true" />
+          {generating && (
+            <div className="foundry-build-journal" role="status" aria-live="polite">
+              <div className="build-journal-title"><LoaderCircle className="spin" /><span>BUILDING / {buildSubject.toUpperCase()}</span></div>
+              <div className="build-journal-feed">
+                {buildJournal.map((entry, index) => (
+                  <p key={`${entry.stage}-${index}`} style={{ opacity: 0.28 + ((index + 1) / Math.max(buildJournal.length, 1)) * 0.68 }}>
+                    <i>{entry.stage}</i><span>{entry.message}</span>
+                  </p>
+                ))}
+              </div>
+              <small>Research and high-resolution image rendering can take several minutes. Finished subjects reopen instantly from the gallery.</small>
+            </div>
+          )}
           <div
             className={`foundry-assembly${hasIllustratedExplosion ? ' rich-assembled' : ''}${atlas.imageOrientation === 'portrait' ? ' portrait' : ''}`}
             style={{

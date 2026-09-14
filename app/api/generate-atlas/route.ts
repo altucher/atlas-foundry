@@ -12,6 +12,9 @@ const requestWindows = new Map<string, number[]>();
 const windowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 3;
 
+type ProgressStage = 'cache' | 'research' | 'source' | 'inventory' | 'render' | 'mapping' | 'save' | 'done';
+type ProgressReporter = (entry: { stage: ProgressStage; message: string }) => void;
+
 type AiConnection = {
   apiKey: string;
   baseUrl: string;
@@ -328,13 +331,19 @@ export async function POST(request: Request) {
       if (target.origin !== new URL(request.url).origin) {
         const response = await fetch(target, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: request.headers.get('accept') ?? 'application/json',
+          },
           body: JSON.stringify({ prompt }),
           cache: 'no-store',
         });
         return new Response(response.body, {
           status: response.status,
-          headers: { 'Content-Type': response.headers.get('Content-Type') ?? 'application/json' },
+          headers: {
+            'Content-Type': response.headers.get('Content-Type') ?? 'application/json',
+            'Cache-Control': response.headers.get('Cache-Control') ?? 'no-store',
+          },
         });
       }
     } catch (error) {
@@ -342,8 +351,13 @@ export async function POST(request: Request) {
     }
   }
 
+  const run = async (report: ProgressReporter): Promise<Response> => {
+  report({ stage: 'cache', message: 'Checking the shared gallery for a finished atlas…' });
   const cachedAtlas = await loadCachedAtlas(cacheKeyForPrompt(prompt));
-  if (cachedAtlas) return NextResponse.json({ atlas: cachedAtlas, cached: true });
+  if (cachedAtlas) {
+    report({ stage: 'done', message: `Found ${cachedAtlas.subject} in the shared gallery.` });
+    return NextResponse.json({ atlas: cachedAtlas, cached: true });
+  }
 
   const connection = getAiConnection(request);
   if (!connection) {
@@ -377,6 +391,7 @@ Rumors are allowed only when a real returned source publishes the claim. Never t
 Set imageOrientation to portrait for strongly vertical subjects such as launch vehicles, towers, standing anatomy, or long upright tools; otherwise use landscape. The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, literally exhaustive parts database, or investment recommendation.`;
 
   try {
+    report({ stage: 'research', message: `Searching authoritative public sources for ${prompt}…` });
     const researchResponse = await fetch(`${connection.baseUrl}/responses`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
@@ -396,9 +411,16 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     const responsePayload = (await researchResponse.json()) as Record<string, unknown>;
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
     const normalized = normalizeAtlas(rawAtlas);
+    report({ stage: 'inventory', message: `Mapped ${normalized.parts.length} documented components across ${new Set(normalized.parts.map((part) => part.system)).size} systems.` });
+    for (const source of normalized.sources) {
+      report({ stage: 'source', message: `Source · ${source.publisher} — ${source.title}` });
+    }
+    report({ stage: 'render', message: 'Rendering a matched photorealistic assembled and exploded image pair…' });
     const imageResults = await Promise.allSettled([
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation),
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation),
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
+        .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation)
+        .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
     ]);
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
     const explodedImage = imageResults[1].status === 'fulfilled' ? imageResults[1].value : undefined;
@@ -408,10 +430,13 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     const imageWarning = imageWarnings.length ? imageWarnings.join(' ') : undefined;
     let hotspots = explodedImage ? fallbackHotspots(normalized.parts) : undefined;
     if (explodedImage) {
+      report({ stage: 'mapping', message: `Mapping ${normalized.parts.length} clickable component regions onto the exploded render…` });
       try {
         hotspots = await locateHotspots(connection, explodedImage, normalized.parts);
+        report({ stage: 'mapping', message: 'Clickable component map complete.' });
       } catch (error) {
         console.warn('Using fallback hotspot layout', error);
+        report({ stage: 'mapping', message: 'Using the non-overlapping fallback component map.' });
       }
     }
     let atlas: FoundryAtlas = {
@@ -433,10 +458,13 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     };
     let cacheWarning: string | undefined;
     try {
+      report({ stage: 'save', message: 'Saving the atlas and image pair to the shared gallery…' });
       atlas = await saveAtlasToGallery(atlas, prompt);
+      report({ stage: 'done', message: 'Atlas complete and ready for instant reuse.' });
     } catch (error) {
       console.warn('Atlas generated but could not be added to the gallery', error);
       cacheWarning = 'The atlas was generated, but the shared gallery could not save it this time.';
+      report({ stage: 'done', message: 'Atlas complete; the gallery save was unavailable.' });
     }
     return NextResponse.json({
       atlas,
@@ -450,4 +478,33 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     console.error('Atlas generation failed', error);
     return NextResponse.json({ error: 'The atlas could not be generated. Please try a more specific subject.' }, { status: 500 });
   }
+  };
+
+  if (request.headers.get('accept')?.includes('application/x-ndjson')) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (value: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+        try {
+          const response = await run((entry) => send({ type: 'progress', ...entry }));
+          const payload = await response.json();
+          send({ type: 'result', status: response.status, payload });
+        } catch (error) {
+          console.error('Atlas progress stream failed', error);
+          send({ type: 'result', status: 500, payload: { error: 'The atlas could not be generated.' } });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
+      },
+    });
+  }
+
+  return run(() => undefined);
 }

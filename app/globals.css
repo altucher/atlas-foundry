@@ -386,6 +386,14 @@ a { color: inherit; }
 .foundry-stage { position: relative; min-width: 0; min-height: 720px; overflow: hidden; background: radial-gradient(circle at 50% 48%, #33322d50 0, #17181545 35%, #090a0900 63%); }
 .foundry-stage-head { position: absolute; z-index: 8; top: 21px; left: 24px; right: 24px; display: flex; justify-content: space-between; color: #6c6f67; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; letter-spacing: .15em; }
 .foundry-stage-grid { position: absolute; inset: 0; opacity: .18; background-image: linear-gradient(#dcd4c411 1px, transparent 1px), linear-gradient(90deg, #dcd4c411 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(circle at center, #000, transparent 78%); }
+.foundry-build-journal { position: absolute; z-index: 14; inset: 54px 28px 116px; display: flex; flex-direction: column; justify-content: center; padding: clamp(20px, 4vw, 46px); border: 1px solid #d4c49b30; background: radial-gradient(circle at 50% 42%, #25251eeb, #0b0c0af5 72%); box-shadow: 0 28px 80px #000b, inset 0 1px #ffffff08; backdrop-filter: blur(14px); }
+.build-journal-title { display: flex; align-items: center; gap: 10px; color: #c6b78f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; letter-spacing: .18em; }
+.build-journal-title svg { width: 14px; }
+.foundry-build-journal .spin { animation: foundry-spin 1s linear infinite; }
+.build-journal-feed { max-height: 300px; margin: 22px 0 18px; overflow: hidden; mask-image: linear-gradient(to bottom, transparent, #000 18%, #000 100%); }
+.build-journal-feed p { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 14px; margin: 0; padding: 6px 0; color: #c5c1b5; font-size: 10px; line-height: 1.5; transition: opacity .35s; }
+.build-journal-feed i { color: #827a65; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; font-style: normal; letter-spacing: .14em; text-transform: uppercase; }
+.foundry-build-journal > small { max-width: 540px; color: #65675f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .08em; line-height: 1.7; text-transform: uppercase; }
 .foundry-stage::before, .foundry-stage::after { content: ""; position: absolute; z-index: 1; background: #d9d0bd13; }
 .foundry-stage::before { top: 50%; left: 7%; right: 7%; height: 1px; }
 .foundry-stage::after { left: 50%; top: 8%; bottom: 14%; width: 1px; }
@@ -548,6 +556,9 @@ a { color: inherit; }
   .vendor-index-list { display: grid; grid-template-columns: 1fr 1fr; max-height: 170px; }
   .foundry-mode { margin-top: 12px; padding-top: 12px; }
   .foundry-stage { min-height: 680px; }
+  .foundry-build-journal { inset: 47px 10px 109px; justify-content: flex-start; padding: 22px 18px; }
+  .build-journal-feed { max-height: 390px; margin-block: 18px 14px; }
+  .build-journal-feed p { grid-template-columns: 58px minmax(0, 1fr); gap: 9px; font-size: 9px; }
   .foundry-assembly { top: 43%; width: 91%; }
   .foundry-assembly.rich-assembled { top: 39%; width: 118%; }
   .foundry-exploded-visual { top: 39%; width: 118%; }

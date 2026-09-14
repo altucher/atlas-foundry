@@ -41,7 +41,11 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /process\.env\.OPENAI_API_KEY/);
   assert.match(generationRoute, /loadCachedAtlas/);
   assert.match(generationRoute, /saveAtlasToGallery/);
+  assert.match(generationRoute, /application\/x-ndjson/);
+  assert.match(generationRoute, /Source ·/);
   assert.match(galleryRoute, /ATLAS_CACHE_ORIGIN/);
   assert.match(store, /@vercel\/blob/);
   assert.match(store, /cacheKeyForPrompt/);
+  assert.match(page, /scrollIntoView/);
+  assert.match(page, /foundry-build-journal/);
 });

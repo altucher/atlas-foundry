@@ -76,6 +76,8 @@ public/ATTRIBUTION.md         Anatomy data license and adaptation details
 4. A vision pass locates each researched part in the exploded image and attaches its source-backed record to a clickable hotspot. If visual generation or localization fails, the researched catalog still returns with a deterministic non-overlapping inventory fallback.
 5. The completed atlas and its image pair are stored under a normalized subject key in Vercel Blob. A repeated prompt is served from the shared gallery before any research or image generation runs.
 
+The browser requests an NDJSON progress stream. Submission immediately scrolls to the workbench, where a quiet build journal reports cache lookup, research, the actual named sources returned by the research pass, component inventory size, both image renders, hotspot mapping, and the gallery save. These are operational milestones—not hidden model reasoning.
+
 The UI packs only the currently visible records, interpolating them from the assembled center into a responsive desktop or two-column mobile inventory. Search and system filters recompute the layout, so filtered parts do not leave gaps or overlap.
 
 The gallery is shared by all visitors to the canonical deployment. It is a cache of generated educational artifacts, not an assertion that all changing supplier relationships remain current forever; source and applicability notes remain visible on every saved record.
