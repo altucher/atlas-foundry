@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import Link from 'next/link';
 import {
   ArrowRight,
-  BookOpen,
   Box,
   ChevronRight,
   CircleAlert,
@@ -117,7 +116,7 @@ export default function FoundryHome() {
     return atlas.parts.filter((part) => {
       const inSystem = activeSystem === 'All systems' || part.system === activeSystem;
       const inVendor = !activeVendor || (part.suppliers ?? []).some((supplier) => supplier.company === activeVendor);
-      const supplierTerms = (part.suppliers ?? []).map((supplier) => `${supplier.company} ${supplier.ticker ?? ''} ${supplier.relationshipStatus}`).join(' ');
+      const supplierTerms = (part.suppliers ?? []).map((supplier) => `${supplier.company} ${supplier.ticker ?? ''} ${supplier.role ?? ''} ${supplier.relationshipStatus} ${supplier.note}`).join(' ');
       const connectionTerms = (part.connections ?? []).map((connection) => `${connection.relationship} ${connection.description} ${connection.toPartId}`).join(' ');
       const matches = !term || `${part.name} ${part.system} ${part.sourceId} ${supplierTerms} ${connectionTerms}`.toLowerCase().includes(term);
       return inSystem && inVendor && matches;
@@ -549,7 +548,7 @@ export default function FoundryHome() {
                       <div className="supplier-heading">
                         <i>{supplierStatusLabel(supplier.relationshipStatus)}</i>
                         <strong>{supplier.company}</strong>
-                        <small>{supplier.isPublicCompany ? `${supplier.exchange} · ${supplier.ticker}` : 'PRIVATE COMPANY · NO PUBLIC TICKER'}</small>
+                        <small>{`${(supplier.role ?? 'component supplier').replaceAll('-', ' ')} · ${supplier.isPublicCompany ? `${supplier.exchange} · ${supplier.ticker}` : 'PRIVATE COMPANY · NO PUBLIC TICKER'}`}</small>
                       </div>
                       <p>{supplier.note}</p>
                       {supplier.financeUrl ? (
@@ -559,7 +558,7 @@ export default function FoundryHome() {
                       ) : <span className="supplier-private">PRIVATE VENDOR</span>}
                     </div>
                   ))}
-                  <p className="supplier-disclaimer">Supplier relationships can vary by generation, model year, trim, market, and plant. Reported and rumor labels are sourced claims—not confirmation or investment advice.</p>
+                  <p className="supplier-disclaimer">Roles distinguish makers, assemblers, designers, IP licensors, software/material providers, and integrators. Relationships may be current, former, alternate, or generation-specific. Reported and rumor labels are sourced claims—not confirmation or investment advice.</p>
                 </div>
               ) : null}
               {selectedConnections.length ? (
@@ -584,14 +583,12 @@ export default function FoundryHome() {
               </div>
             </>
           ) : <p>Select a component to inspect its record.</p>}
-          <div className="foundry-accuracy"><CircleAlert /><p><strong>Know what this is.</strong>{atlas.accuracyNote}</p></div>
         </aside>
       </section>
 
       <section className="foundry-footnotes">
         <div><span className="foundry-section-number">03 / RESEARCH NOTE</span><p>{atlas.summary}</p></div>
         <div className="source-register"><span className="foundry-section-number">SOURCE REGISTER</span>{atlas.sources.map((source, index) => <a key={source.id} href={source.url} target="_blank" rel="noreferrer"><i>{String(index + 1).padStart(2, '0')}</i><span>{source.publisher}</span><ExternalLink /></a>)}</div>
-        <div className="foundry-boundary"><BookOpen /><p><strong>Conceptual by default.</strong> Generated atlases explain the deepest documented component set that fits a readable plate. They do not infer hidden geometry. Supplier claims are labeled confirmed, reported, or rumor. When an authoritative mesh dataset exists, use a verified 3D edition—like the human atlas.</p></div>
       </section>
     </main>
   );

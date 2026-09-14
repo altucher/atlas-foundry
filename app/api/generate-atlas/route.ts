@@ -15,13 +15,14 @@ const defaultImageModel = 'gpt-image-2.5-flare';
 const requestWindows = new Map<string, number[]>();
 const windowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 3;
+const supplierRoles = ['manufacturer', 'assembler', 'designer', 'ip-licensor', 'software-provider', 'material-supplier', 'integrator', 'other'] as const;
 const aiDispatcher = new Agent({
   headersTimeout: 780_000,
   bodyTimeout: 780_000,
   connectTimeout: 30_000,
 });
 
-type ProgressStage = 'cache' | 'research' | 'source' | 'inventory' | 'render' | 'mapping' | 'save' | 'done';
+type ProgressStage = 'cache' | 'research' | 'source' | 'inventory' | 'vendor' | 'render' | 'mapping' | 'save' | 'done';
 type ProgressReporter = (entry: { stage: ProgressStage; message: string }) => void;
 
 type AiConnection = {
@@ -122,9 +123,10 @@ const atlasSchema = {
             items: {
               type: 'object',
               additionalProperties: false,
-              required: ['company', 'isPublicCompany', 'ticker', 'exchange', 'yahooSymbol', 'evidenceUrl', 'relationshipStatus', 'note'],
+              required: ['company', 'role', 'isPublicCompany', 'ticker', 'exchange', 'yahooSymbol', 'evidenceUrl', 'relationshipStatus', 'note'],
               properties: {
                 company: { type: 'string' },
+                role: { type: 'string', enum: supplierRoles },
                 isPublicCompany: { type: 'boolean' },
                 ticker: { type: ['string', 'null'] },
                 exchange: { type: ['string', 'null'] },
@@ -140,6 +142,59 @@ const atlasSchema = {
     },
   },
 } as const;
+
+const supplierResearchSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['sources', 'relationships'],
+  properties: {
+    sources: {
+      type: 'array', minItems: 1, maxItems: 30,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'title', 'publisher', 'url'],
+        properties: {
+          id: { type: 'string' }, title: { type: 'string' }, publisher: { type: 'string' }, url: { type: 'string' },
+        },
+      },
+    },
+    relationships: {
+      type: 'array', minItems: 0, maxItems: 160,
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['partId', 'company', 'role', 'isPublicCompany', 'ticker', 'exchange', 'yahooSymbol', 'evidenceUrl', 'relationshipStatus', 'note'],
+        properties: {
+          partId: { type: 'string' },
+          company: { type: 'string' },
+          role: { type: 'string', enum: supplierRoles },
+          isPublicCompany: { type: 'boolean' },
+          ticker: { type: ['string', 'null'] },
+          exchange: { type: ['string', 'null'] },
+          yahooSymbol: { type: ['string', 'null'] },
+          evidenceUrl: { type: 'string' },
+          relationshipStatus: { type: 'string', enum: ['confirmed', 'reported', 'rumored'] },
+          note: { type: 'string' },
+        },
+      },
+    },
+  },
+} as const;
+
+type SupplierResearchResult = {
+  sources: AtlasSource[];
+  relationships: Array<{
+    partId: string;
+    company: string;
+    role: (typeof supplierRoles)[number];
+    isPublicCompany: boolean;
+    ticker: string | null;
+    exchange: string | null;
+    yahooSymbol: string | null;
+    evidenceUrl: string;
+    relationshipStatus: 'confirmed' | 'reported' | 'rumored';
+    note: string;
+  }>;
+};
 
 function extractOutputText(payload: Record<string, unknown>) {
   if (typeof payload.output_text === 'string') return payload.output_text;
@@ -187,6 +242,7 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
         || !['confirmed', 'reported', 'rumored'].includes(supplier.relationshipStatus)) continue;
       const normalizedSupplier: NonNullable<AtlasPart['suppliers']>[number] = {
         company: supplier.company.trim().slice(0, 100),
+        role: supplierRoles.includes(supplier.role ?? 'other') ? (supplier.role ?? 'other') : 'other',
         isPublicCompany,
         ticker: isPublicCompany ? ticker : null,
         exchange: isPublicCompany ? exchange : null,
@@ -194,7 +250,7 @@ function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string
         evidenceUrl,
         financeUrl: isPublicCompany && yahooSymbol ? `https://finance.yahoo.com/quote/${encodeURIComponent(yahooSymbol)}/` : null,
         relationshipStatus: supplier.relationshipStatus,
-        note: supplier.note.trim().slice(0, 220),
+        note: supplier.note.trim().slice(0, 420),
       };
       const key = `${normalizedSupplier.company}|${normalizedSupplier.relationshipStatus}|${normalizedSupplier.note}`.toLowerCase();
       if (!supplierMap.has(key)) supplierMap.set(key, normalizedSupplier);
@@ -267,6 +323,7 @@ async function generateResearchInBackground(
   connection: AiConnection,
   body: Record<string, unknown>,
   report: ProgressReporter,
+  progress: { stage: ProgressStage; message: string } = { stage: 'research', message: 'Researching the architecture and component evidence' },
 ) {
   const headers = { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' };
   const created = await undiciFetch(`${connection.baseUrl}/responses`, {
@@ -290,7 +347,7 @@ async function generateResearchInBackground(
     const elapsed = Date.now() - startedAt;
     if (elapsed > 500_000) throw new Error('Background research exceeded its eight-minute completion budget.');
     if (elapsed - lastProgressAt >= 25_000) {
-      report({ stage: 'research', message: `Researching the architecture and supplier evidence… ${Math.max(1, Math.round(elapsed / 1000))} seconds elapsed.` });
+      report({ stage: progress.stage, message: `${progress.message}… ${Math.max(1, Math.round(elapsed / 1000))} seconds elapsed.` });
       lastProgressAt = elapsed;
     }
     await new Promise((resolve) => setTimeout(resolve, 5_000));
@@ -308,6 +365,84 @@ async function generateResearchInBackground(
 
   if (payload.status !== 'completed') throw new Error(responseFailure(payload));
   return payload;
+}
+
+async function researchSupplierBatch(
+  connection: AiConnection,
+  atlas: ReturnType<typeof normalizeAtlas>,
+  parts: AtlasPart[],
+  batchIndex: number,
+  batchCount: number,
+  report: ProgressReporter,
+) {
+  const partList = parts.map((part) => `${part.id} | ${part.name} | ${part.system}`).join('\n');
+  const existingSources = atlas.sources.map((source) => `${source.publisher}: ${source.url}`).join('\n');
+  const instructions = `You are a forensic component-supply-chain researcher. Investigate potential vendors for EVERY component id supplied. Search component by component rather than stopping after famous headline suppliers. Return every defensible current, former, alternative, generation-specific, factory-specific, regional, or credible published rumored relationship supported by a returned source. Several companies may be returned for one component.
+
+Distinguish the vendor's role precisely: manufacturer, assembler, designer, IP licensor, software provider, material supplier, integrator, or other. Treat cell makers and battery-pack assemblers as different roles; likewise distinguish a display-panel maker from the finished display-module assembler, a semiconductor foundry from a chip designer or IP licensor, and a component maker from the product's contract assembler. Include relevant licensed architecture, protocol, codec, semiconductor, software, or other embedded IP only when a source establishes it.
+
+For a specific named product, only connect a vendor to a component when the evidence explicitly ties it to that product, product family, teardown, generation, model year, trim, market, factory, or period. A general corporate supplier list confirms that a company supplies the brand, but by itself does not prove which component it supplies. Use it as corroboration, not as an invented component mapping. For a generic category, a relationship may show that the vendor makes or sells that exact component class; the note must call it a representative market offering and not evidence of deployment in one facility.
+
+Set confirmed only for first-party statements, regulatory records, procurement records, direct component markings/teardowns, or customer/supplier material that establishes the relationship. Set reported for a credible established technical, industry, or financial publication. Set rumored only when a real returned publication explicitly makes the claim. Do not convert repetition, resale listings, repair-shop marketing, or visual resemblance into evidence.
+
+Each note must state the role, exact product/version/time scope, whether the relationship is current, historical, alternative, or uncertain, and what the cited source actually establishes. Every evidenceUrl must exactly match one URL in sources. Use real HTTPS URLs consulted in this pass. Set current public-company ticker, exchange, and exact Yahoo symbol; use null for all three private-company fields. Return no relationship when evidence is inadequate.`;
+  report({ stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} · checking ${parts.length} components individually…` });
+  const payload = await generateResearchInBackground(connection, {
+    model: connection.researchModel,
+    instructions,
+    input: `Subject: ${atlas.subject}\nCategory: ${atlas.category}\nAccuracy boundary: ${atlas.accuracyNote}\n\nComponent ids:\n${partList}\n\nExisting architecture sources (use only when they directly support a relationship):\n${existingSources}`,
+    tools: [{ type: 'web_search', search_context_size: 'medium' }],
+    text: { format: { type: 'json_schema', name: 'supplier_evidence', strict: true, schema: supplierResearchSchema } },
+  }, report, { stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} is still searching` });
+  return JSON.parse(extractOutputText(payload)) as SupplierResearchResult;
+}
+
+async function enrichSuppliers(
+  connection: AiConnection,
+  atlas: ReturnType<typeof normalizeAtlas>,
+  report: ProgressReporter,
+) {
+  const batchSize = 20;
+  const batches = Array.from({ length: Math.ceil(atlas.parts.length / batchSize) }, (_, index) => atlas.parts.slice(index * batchSize, (index + 1) * batchSize));
+  const settled = await Promise.allSettled(batches.map((parts, index) => researchSupplierBatch(connection, atlas, parts, index, batches.length, report)));
+  const successful = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+  const failedCount = settled.length - successful.length;
+  for (const result of settled) {
+    if (result.status === 'rejected') console.warn('Supplier evidence batch failed', result.reason);
+  }
+  if (failedCount) report({ stage: 'vendor', message: `${failedCount} of ${settled.length} supplier evidence ${failedCount === 1 ? 'pass was' : 'passes were'} unavailable; preserving all verified results from the completed passes.` });
+  if (!successful.length) {
+    report({ stage: 'vendor', message: 'No additional defensible supplier mappings were returned; retaining any relationships found in the architecture pass.' });
+    return atlas;
+  }
+
+  const sourceByUrl = new Map(atlas.sources.map((source) => [source.url, source]));
+  for (const result of successful) {
+    for (const source of result.sources) {
+      const url = safeUrl(source.url);
+      if (!url || sourceByUrl.has(url)) continue;
+      const normalizedSource = { ...source, url };
+      sourceByUrl.set(url, normalizedSource);
+      report({ stage: 'source', message: `Supplier source · ${source.publisher} — ${source.title}` });
+    }
+  }
+  const sources = [...sourceByUrl.values()].map((source, index) => ({ ...source, id: `source-${index + 1}` }));
+  const relationships = successful.flatMap((result) => result.relationships);
+  const enriched = normalizeAtlas({
+    ...atlas,
+    sources,
+    parts: atlas.parts.map((part) => ({
+      ...part,
+      suppliers: [
+        ...(part.suppliers ?? []),
+        ...relationships.filter((relationship) => relationship.partId === part.id).map((relationship) => ({ ...relationship, financeUrl: null })),
+      ],
+    })),
+  });
+  const relationshipCount = enriched.parts.reduce((count, part) => count + (part.suppliers?.length ?? 0), 0);
+  const companyCount = new Set(enriched.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.company))).size;
+  report({ stage: 'vendor', message: `Mapped ${relationshipCount} sourced component relationships across ${companyCount} potential vendors, including historical and variant-specific records.` });
+  return enriched;
 }
 
 async function generateImage(
@@ -478,11 +613,13 @@ Build the fullest useful component inventory that public evidence supports, with
 
 Never invent proprietary internals, exact geometry, hidden components, identifiers, suppliers, or stock listings. When documentation supports the existence of an assembly but not its precise construction, include it only at the supported assembly level and mark confidence contextual. Do not provide dangerous disassembly instructions. Return concise plain English. Source URLs must be real HTTPS pages you consulted and every part should cite at least one returned source URL when possible.
 
-For an engineered product, suppliers is a list because one component may have multiple suppliers across variants, factories, generations, model years, contracts, or reports. Include both public and private suppliers when evidence supports the relationship. For a named product, a supplier record means evidence connects that vendor to that product. For a generic category, a supplier record instead means evidence shows that the vendor makes or sells that exact component class; make the note say it is a representative vendor offering and not proof of deployment in any one facility. Include multiple credible alternative vendors per component when sources support them, rather than selecting one arbitrary company. When vendors differ by generation, year, trim, market, factory, or revision, include each separately and make that distinction explicit in note. Set one evidence status per relationship:
+For an engineered product, suppliers is a list because one component may have multiple suppliers across variants, factories, generations, model years, contracts, or reports. Include both public and private suppliers when evidence supports the relationship. Distinguish each role as manufacturer, assembler, designer, IP licensor, software provider, material supplier, integrator, or other; do not collapse a cell maker into a battery-pack assembler, a chip designer into its foundry, or an IP licensor into the component manufacturer. For a named product, a supplier record means evidence connects that vendor to that product. For a generic category, a supplier record instead means evidence shows that the vendor makes or sells that exact component class; make the note say it is a representative vendor offering and not proof of deployment in any one facility. Include multiple credible alternative vendors per component when sources support them, rather than selecting one arbitrary company. When vendors differ by generation, year, trim, market, factory, or revision, include each separately and make that distinction explicit in note. Set one evidence status per relationship:
 - confirmed: first-party, regulatory filing, customer, or supplier evidence directly confirms the component relationship;
 - reported: a credible established technical or financial publication reports it, but the companies do not directly confirm it;
 - rumored: a published rumor, analyst claim, or teardown inference alleges it without confirmation.
 Rumors are allowed only when a real returned source publishes the claim. Never turn absence of evidence, visual resemblance, internet repetition, or your own inference into a rumor. The note must briefly state what product generation, version, period, region, plant, trim, generic-market role, or uncertainty the claim applies to. Do not treat the product's brand owner as a component supplier unless it actually manufactures that named component. Each evidenceUrl must exactly match one URL in sources that supports the component-supplier relationship, and part.sourceUrls must include it. Set isPublicCompany accurately. For a public company, ticker is its current exchange ticker and yahooSymbol is the exact symbol Yahoo Finance uses, including market suffixes such as .T, .DE, or .KS. For a private company, set ticker, exchange, and yahooSymbol to null.
+
+This first pass should capture readily established supplier relationships but spend most of its search budget on the complete component architecture; a dedicated component-by-component vendor and IP pass follows.
 
 Use connections to explain architecture. For each part, list up to ten directly connected returned part ids and classify each relationship as power, data, thermal, fluid, mechanical, structural, control, or other. The description must state what crosses the interface and in which direction when meaningful—for example electrical power, coolant, air, optical data, packets, torque, exhaust, or control signals. Use exact ids from the same parts array, never external or invented ids. Prefer a connected system graph over isolated component cards, but do not duplicate reciprocal edges unless each direction teaches something different.
 
@@ -504,11 +641,18 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       report({ stage: 'source', message: `Source · ${source.publisher} — ${source.title}` });
     }
     report({ stage: 'render', message: 'Rendering a matched photorealistic assembled and exploded image pair…' });
-    const imageResults = await Promise.allSettled([
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
-        .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation)
-        .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
+    const [enriched, imageResults] = await Promise.all([
+      enrichSuppliers(connection, normalized, report).catch((error) => {
+        console.warn('Dedicated supplier evidence pass failed', error);
+        report({ stage: 'vendor', message: 'The dedicated supplier pass was incomplete; retaining relationships established by the architecture research.' });
+        return normalized;
+      }),
+      Promise.allSettled([
+        generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
+          .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
+        generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation)
+          .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
+      ]),
     ]);
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
     const explodedImage = imageResults[1].status === 'fulfilled' ? imageResults[1].value : undefined;
@@ -516,11 +660,11 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       ? [`${index === 0 ? 'Assembled' : 'Exploded'} image: ${result.reason instanceof Error ? result.reason.message : 'generation failed.'}`]
       : []);
     const imageWarning = imageWarnings.length ? imageWarnings.join(' ') : undefined;
-    let hotspots = explodedImage ? fallbackHotspots(normalized.parts) : undefined;
+    let hotspots = explodedImage ? fallbackHotspots(enriched.parts) : undefined;
     if (explodedImage) {
-      report({ stage: 'mapping', message: `Mapping ${normalized.parts.length} clickable component regions onto the exploded render…` });
+      report({ stage: 'mapping', message: `Mapping ${enriched.parts.length} clickable component regions onto the exploded render…` });
       try {
-        hotspots = await locateHotspots(connection, explodedImage, normalized.parts);
+        hotspots = await locateHotspots(connection, explodedImage, enriched.parts);
         report({ stage: 'mapping', message: 'Clickable component map complete.' });
       } catch (error) {
         console.warn('Using fallback hotspot layout', error);
@@ -528,18 +672,18 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       }
     }
     let atlas: FoundryAtlas = {
-      subject: normalized.subject,
-      subtitle: normalized.subtitle,
-      category: normalized.category,
-      summary: normalized.summary,
-      accuracyNote: normalized.accuracyNote,
-      parts: normalized.parts,
-      sources: normalized.sources,
+      subject: enriched.subject,
+      subtitle: enriched.subtitle,
+      category: enriched.category,
+      summary: enriched.summary,
+      accuracyNote: enriched.accuracyNote,
+      parts: enriched.parts,
+      sources: enriched.sources,
       image,
       imageAlt: `Photorealistic AI-generated assembled reference view of ${normalized.subject}`,
       explodedImage,
       explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${normalized.subject}`,
-      imageOrientation: normalized.imageOrientation,
+      imageOrientation: enriched.imageOrientation,
       hotspots,
       mode: 'generated',
       generatedAt: new Date().toISOString(),

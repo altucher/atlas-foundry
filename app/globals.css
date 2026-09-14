@@ -505,12 +505,7 @@ a { color: inherit; }
 .foundry-citations small { color: #5d6059; font-size: 7px; }
 .foundry-citations svg { width: 11px; flex: none; color: #64675f; }
 .foundry-citations > p { color: #696c64; font-size: 9px; }
-.foundry-accuracy { display: flex; align-items: flex-start; gap: 9px; margin-top: 30px; padding: 13px; border: 1px solid #b9a47428; background: #2723197d; }
-.foundry-accuracy svg { width: 13px; flex: none; margin-top: 2px; color: #b9a474; }
-.foundry-accuracy p { margin: 0; color: #7d7b70; font-size: 8px; line-height: 1.6; }
-.foundry-accuracy strong { display: block; margin-bottom: 3px; color: #aaa391; font-weight: 500; }
-
-.foundry-footnotes { position: relative; z-index: 2; display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 0; margin: 0 clamp(18px, 2.5vw, 40px) 50px; border: 1px solid var(--foundry-line); }
+.foundry-footnotes { position: relative; z-index: 2; display: grid; grid-template-columns: 1.15fr 1fr; gap: 0; margin: 0 clamp(18px, 2.5vw, 40px) 50px; border: 1px solid var(--foundry-line); }
 .foundry-footnotes > div { min-height: 175px; padding: 24px; }
 .foundry-footnotes > div + div { border-left: 1px solid var(--foundry-line); }
 .foundry-footnotes > div:first-child > p { margin: 25px 0 0; color: #898b82; font-family: Georgia, "Times New Roman", serif; font-size: 15px; line-height: 1.55; }
@@ -521,10 +516,6 @@ a { color: inherit; }
 .source-register a i { color: #b09e77; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; font-style: normal; }
 .source-register a span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .source-register svg { width: 9px; flex: none; }
-.foundry-boundary { display: flex; align-items: flex-start; gap: 13px; background: #0d0e0c; }
-.foundry-boundary > svg { width: 17px; flex: none; color: #af9f7a; }
-.foundry-boundary p { margin: 0; color: #777970; font-size: 9px; line-height: 1.75; }
-.foundry-boundary strong { display: block; margin-bottom: 7px; color: #aaa89c; font-size: 10px; font-weight: 500; }
 @keyframes foundry-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1120px) {
@@ -542,7 +533,6 @@ a { color: inherit; }
   .foundry-detail { grid-column: 1 / -1; min-height: 380px; border-top: 1px solid var(--foundry-line); border-left: 0; }
   .foundry-detail .detail-index-row { margin-top: 25px; }
   .foundry-footnotes { grid-template-columns: 1fr 1fr; }
-  .foundry-footnotes > div:last-child { grid-column: 1 / -1; min-height: 100px; border-top: 1px solid var(--foundry-line); border-left: 0; }
 }
 
 @media (max-width: 760px) {
@@ -593,7 +583,6 @@ a { color: inherit; }
   .foundry-slider { bottom: 18px; }
   .foundry-detail { min-height: 0; padding: 23px 18px 27px; }
   .foundry-detail h2 { font-size: 27px; }
-  .foundry-accuracy { margin-top: 22px; }
   .foundry-footnotes { grid-template-columns: 1fr; margin: 0 8px 30px; }
   .foundry-footnotes > div { min-height: 0; }
   .foundry-footnotes > div + div { border-top: 1px solid var(--foundry-line); border-left: 0; }

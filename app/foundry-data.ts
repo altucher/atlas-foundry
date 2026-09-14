@@ -6,9 +6,11 @@ export type AtlasSource = {
 };
 
 export type SupplierStatus = 'confirmed' | 'reported' | 'rumored';
+export type SupplierRole = 'manufacturer' | 'assembler' | 'designer' | 'ip-licensor' | 'software-provider' | 'material-supplier' | 'integrator' | 'other';
 
 export type AtlasSupplier = {
   company: string;
+  role?: SupplierRole;
   isPublicCompany: boolean;
   ticker: string | null;
   exchange: string | null;

@@ -27,6 +27,8 @@ test("server-renders the Atlas Foundry workbench", async () => {
   assert.match(html, /EXPLOSION/);
   assert.match(html, /Cross-generation platform/);
   assert.match(html, /SUPPLIERS \/ VENDORS/);
+  assert.doesNotMatch(html, /Know what this is/i);
+  assert.doesNotMatch(html, /Conceptual by default/i);
 });
 
 test("keeps credentials server-side and implements shared gallery storage", async () => {
@@ -51,6 +53,9 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /headersTimeout: 780_000/);
   assert.match(generationRoute, /background: true/);
   assert.match(generationRoute, /responses\/\$\{encodeURIComponent\(responseId\)\}/);
+  assert.match(generationRoute, /forensic component-supply-chain researcher/);
+  assert.match(generationRoute, /Supplier evidence pass/);
+  assert.match(generationRoute, /ip-licensor/);
   assert.match(galleryRoute, /ATLAS_CACHE_ORIGIN/);
   assert.match(store, /@vercel\/blob/);
   assert.match(store, /cacheKeyForPrompt/);
