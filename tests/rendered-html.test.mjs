@@ -107,6 +107,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(store, /eight-sleep-mattress/);
   assert.match(store, /normalized === 'mac-512k'/);
   assert.match(store, /seenSubjects/);
+  assert.match(store, /hasGeneratedImagePair/);
+  assert.match(store, /atlas\.image\?\.trim\(\) && atlas\.explodedImage\?\.trim\(\)/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /pendingAtlas\(subject\)/);
   assert.match(page, /payload\.draft && payload\.atlas\.cacheKey\) void refreshGallery/);
@@ -134,7 +136,9 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /explode > 0\.04 && <div className="foundry-part-layers"/);
   assert.match(page, /explode-anything:last-random-atlas/);
   assert.match(page, /hasSharedAtlas \|\| randomArchiveRequestedRef\.current/);
-  assert.match(page, /item\.image && item\.explodedImage/);
+  assert.match(page, /illustratedGalleryItems/);
+  assert.match(page, /item\.image\?\.trim\(\) && item\.explodedImage\?\.trim\(\)/);
+  assert.doesNotMatch(page, /title="Adult male anatomy"/);
   assert.match(page, /random_archive_open/);
   assert.match(page, /gallery-full-title/);
   assert.match(page, /title=\{item\.subject\}/);

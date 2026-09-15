@@ -28,6 +28,10 @@ import { trackAnalytics } from './analytics-client';
 
 const examples = ['data center', 'Falcon 9', 'Tesla', 'espresso machine', 'a male human body'];
 
+function illustratedGalleryItems(items: AtlasGalleryItem[]) {
+  return items.filter((item) => Boolean(item.image?.trim() && item.explodedImage?.trim()));
+}
+
 function supplierSummary(part: AtlasPart) {
   const suppliers = part.suppliers ?? [];
   if (!suppliers.length) return '';
@@ -232,9 +236,9 @@ export default function FoundryHome() {
     try {
       const response = await fetch('/api/gallery', { cache: 'no-store' });
       const payload = await response.json() as { items?: AtlasGalleryItem[] };
-      if (response.ok) setGallery(payload.items ?? []);
+      if (response.ok) setGallery(illustratedGalleryItems(payload.items ?? []));
     } catch {
-      // The two curated editions remain available if shared storage is offline.
+      // The curated Tesla edition remains available if shared storage is offline.
     } finally {
       setGalleryLoading(false);
     }
@@ -245,7 +249,7 @@ export default function FoundryHome() {
       .then(async (response) => ({ response, payload: await response.json() as { items?: AtlasGalleryItem[] } }))
       .then(({ response, payload }) => {
         if (!response.ok) return;
-        const items = payload.items ?? [];
+        const items = illustratedGalleryItems(payload.items ?? []);
         setGallery(items);
 
         // A shared atlas URL must remain stable. Plain homepage visits rotate
@@ -255,8 +259,7 @@ export default function FoundryHome() {
         if (hasSharedAtlas || randomArchiveRequestedRef.current || items.length === 0) return;
         randomArchiveRequestedRef.current = true;
 
-        const illustratedItems = items.filter((item) => item.image && item.explodedImage);
-        const completePool = illustratedItems.length > 0 ? illustratedItems : items;
+        const completePool = items;
         let previousKey = '';
         try {
           previousKey = window.sessionStorage.getItem('explode-anything:last-random-atlas') ?? '';
@@ -641,7 +644,7 @@ export default function FoundryHome() {
       <section className="foundry-gallery" aria-label="Saved atlas gallery">
         <div className="foundry-gallery-head">
           <div><span className="foundry-section-number">SAVED / SHARED GALLERY</span><h2>Ready to open instantly</h2></div>
-          <small>{galleryLoading ? 'CHECKING ARCHIVE…' : `${gallery.length + 2} ATLASES AVAILABLE`}</small>
+          <small>{galleryLoading ? 'CHECKING ARCHIVE…' : `${gallery.length + 1} ATLASES AVAILABLE`}</small>
         </div>
         <div className="foundry-gallery-track">
           <button type="button" className="foundry-gallery-card" title="Tesla electric vehicle" onClick={() => openCuratedAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.')}>
@@ -650,24 +653,16 @@ export default function FoundryHome() {
             <ChevronRight />
             <span className="gallery-full-title" role="tooltip">Tesla electric vehicle</span>
           </button>
-          <Link className="foundry-gallery-card" href="/human" title="Adult male anatomy">
-            <span className="gallery-image portrait"><img src="/og.png" alt="Verified adult male anatomy atlas" /></span>
-            <span className="gallery-card-copy"><small>VERIFIED / BODYParts3D</small><strong>Adult male anatomy</strong><em>Official mesh edition</em></span>
-            <ChevronRight />
-            <span className="gallery-full-title" role="tooltip">Adult male anatomy</span>
-          </Link>
           {gallery.map((item) => (
             <button type="button" className="foundry-gallery-card" key={item.cacheKey} title={item.subject} onClick={() => void openGalleryAtlas(item)} disabled={generating}>
               <span className={`gallery-image${item.imageOrientation === 'portrait' ? ' portrait' : ''}`}>
-                {item.explodedImage ?? item.image ? (
-                  <img
-                    src={item.explodedImage ?? item.image}
-                    alt={`Exploded ${item.subject} atlas`}
-                    loading="lazy"
-                    decoding="async"
-                    fetchPriority="low"
-                  />
-                ) : <Box />}
+                <img
+                  src={item.explodedImage}
+                  alt={`Exploded ${item.subject} atlas`}
+                  loading="lazy"
+                  decoding="async"
+                  fetchPriority="low"
+                />
               </span>
               <span className="gallery-card-copy"><small>{item.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION ? `SAVED / ${item.category}` : 'SAVED / RESEARCH REFRESH'}</small><strong>{item.subject}</strong><em>{item.partCount} parts · {item.supplierCount} vendors</em></span>
               <ChevronRight />

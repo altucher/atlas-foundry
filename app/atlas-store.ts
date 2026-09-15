@@ -157,6 +157,10 @@ function galleryItem(atlas: FoundryAtlas, fallbackKey: string): AtlasGalleryItem
   };
 }
 
+function hasGeneratedImagePair(atlas: FoundryAtlas) {
+  return Boolean(atlas.image?.trim() && atlas.explodedImage?.trim());
+}
+
 export async function listGalleryAtlases() {
   if (!hasSharedAtlasStore()) return [];
   const blobs: ListBlobResultBlob[] = [];
@@ -186,7 +190,9 @@ export async function listGalleryAtlases() {
     const atlas = await readAtlasUrl(blob.url);
     const pathParts = blob.pathname.split('/');
     const fallbackKey = pathParts[pathParts.length - 2] ?? 'atlas';
-    return atlas ? { item: galleryItem(atlas, fallbackKey), uploadedAt: blob.uploadedAt } : null;
+    return atlas && hasGeneratedImagePair(atlas)
+      ? { item: galleryItem(atlas, fallbackKey), uploadedAt: blob.uploadedAt }
+      : null;
   }));
   const sorted = atlases
     .filter((record): record is NonNullable<typeof record> => Boolean(record))
