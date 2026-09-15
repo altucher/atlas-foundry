@@ -395,6 +395,7 @@ export default function FoundryHome() {
       draftDelivered = Boolean(payload.draft);
       trackAnalytics('atlas_result', { query: subject, atlas: payload.atlas.subject, status: 'success', cached: Boolean(payload.cached) });
       setGenerating(false);
+      if (payload.draft && payload.atlas.cacheKey) void refreshGallery();
       if (payload.enrichmentPending && payload.atlas.cacheKey) {
         setEnriching(true);
         setNotice('First draft ready. You can explore and use the explosion slider while detailed supplier and IP research continues.');

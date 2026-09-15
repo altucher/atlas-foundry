@@ -1,4 +1,4 @@
-import { head, list, put } from '@vercel/blob';
+import { head, list, put, type ListBlobResultBlob } from '@vercel/blob';
 
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasGalleryItem, type FoundryAtlas } from './foundry-data';
 
@@ -78,6 +78,10 @@ export async function loadAtlasDraft(cacheKey: string) {
   }
 }
 
+export async function loadGalleryAtlas(cacheKey: string) {
+  return await loadCachedAtlas(cacheKey) ?? await loadAtlasDraft(cacheKey);
+}
+
 function decodeDataImage(value: string) {
   const match = /^data:(image\/(?:webp|png|jpeg));base64,([A-Za-z0-9+/=\s]+)$/.exec(value);
   if (!match) return null;
@@ -154,8 +158,29 @@ function galleryItem(atlas: FoundryAtlas, fallbackKey: string): AtlasGalleryItem
 
 export async function listGalleryAtlases() {
   if (!hasSharedAtlasStore()) return [];
-  const result = await list({ prefix: `${galleryPrefix}/`, limit: 200 });
-  const records = result.blobs.filter((blob) => blob.pathname.endsWith('/atlas.json'));
+  const blobs: ListBlobResultBlob[] = [];
+  let cursor: string | undefined;
+  do {
+    const result = await list({ prefix: `${galleryPrefix}/`, limit: 1000, cursor });
+    blobs.push(...result.blobs);
+    cursor = result.hasMore ? result.cursor : undefined;
+  } while (cursor);
+
+  const recordsByKey = new Map<string, ListBlobResultBlob>();
+  for (const blob of blobs) {
+    if (!blob.pathname.endsWith('/atlas.json') && !blob.pathname.endsWith('/draft.json')) continue;
+    const pathParts = blob.pathname.split('/');
+    const cacheKey = pathParts[pathParts.length - 2];
+    if (!cacheKey) continue;
+    const current = recordsByKey.get(cacheKey);
+    const isComplete = blob.pathname.endsWith('/atlas.json');
+    const currentIsComplete = current?.pathname.endsWith('/atlas.json') ?? false;
+    if (!current || (isComplete && !currentIsComplete) || (isComplete === currentIsComplete && blob.uploadedAt > current.uploadedAt)) {
+      recordsByKey.set(cacheKey, blob);
+    }
+  }
+
+  const records = [...recordsByKey.values()];
   const atlases = await Promise.all(records.map(async (blob) => {
     const atlas = await readAtlasUrl(blob.url);
     const pathParts = blob.pathname.split('/');

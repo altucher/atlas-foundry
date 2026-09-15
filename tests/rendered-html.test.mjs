@@ -95,7 +95,10 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /ip-licensor/);
   assert.match(galleryRoute, /ATLAS_CACHE_ORIGIN/);
   assert.match(galleryRoute, /'Cache-Control': 'no-store'/);
+  assert.match(galleryRoute, /loadGalleryAtlas/);
   assert.match(store, /@vercel\/blob/);
+  assert.match(store, /endsWith\('\/draft\.json'\)/);
+  assert.match(store, /limit: 1000, cursor/);
   assert.match(store, /cacheKeyForPrompt/);
   assert.match(store, /CURRENT_INTELLIGENCE_VERSION/);
   assert.match(store, /normalized === 'data-center' \|\| normalized === 'data-centers'/);
@@ -104,6 +107,7 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(store, /eight-sleep-mattress/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /pendingAtlas\(subject\)/);
+  assert.match(page, /payload\.draft && payload\.atlas\.cacheKey\) void refreshGallery/);
   assert.match(page, /Gallery identity mismatch/);
   assert.match(page, /new AbortController\(\)/);
   assert.match(page, /setAtlas\(pendingAtlas\(item.subject\)\)/);

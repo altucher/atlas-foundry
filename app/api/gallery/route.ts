@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { cacheKeyForPrompt, hasSharedAtlasStore, listGalleryAtlases, loadCachedAtlas } from '@/app/atlas-store';
+import { cacheKeyForPrompt, hasSharedAtlasStore, listGalleryAtlases, loadGalleryAtlas } from '@/app/atlas-store';
 
 export const runtime = 'nodejs';
 
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
     const key = url.searchParams.get('key')?.trim();
     const prompt = url.searchParams.get('prompt')?.trim();
     if (key || prompt) {
-      const atlas = await loadCachedAtlas(key || cacheKeyForPrompt(prompt ?? ''));
+      const atlas = await loadGalleryAtlas(key || cacheKeyForPrompt(prompt ?? ''));
       if (!atlas) return NextResponse.json({ error: 'Atlas not found in the shared gallery.' }, { status: 404 });
       return NextResponse.json({ atlas, cached: true }, {
         headers: { 'Cache-Control': 'no-store' },
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     }
     const items = await listGalleryAtlases();
     return NextResponse.json({ items }, {
-      headers: { 'Cache-Control': 'public, max-age=60, stale-while-revalidate=300' },
+      headers: { 'Cache-Control': 'no-store' },
     });
   } catch (error) {
     console.error('Gallery lookup failed', error);
