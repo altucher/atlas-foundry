@@ -173,6 +173,7 @@ export default function FoundryHome() {
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared'>('idle');
   const lastExplosionEventRef = useRef(-1);
+  const randomArchiveRequestedRef = useRef(false);
 
   const archiveLayers = useMemo(() => atlas.archive?.layers.map((layer) => layer.label) ?? [], [atlas.archive]);
   const systems = useMemo(() => {
@@ -242,7 +243,39 @@ export default function FoundryHome() {
   useEffect(() => {
     fetch('/api/gallery', { cache: 'no-store' })
       .then(async (response) => ({ response, payload: await response.json() as { items?: AtlasGalleryItem[] } }))
-      .then(({ response, payload }) => { if (response.ok) setGallery(payload.items ?? []); })
+      .then(({ response, payload }) => {
+        if (!response.ok) return;
+        const items = payload.items ?? [];
+        setGallery(items);
+
+        // A shared atlas URL must remain stable. Plain homepage visits rotate
+        // through complete illustrated archives, avoiding the previous pick so
+        // each reload reveals a different subject when more than one exists.
+        const hasSharedAtlas = new URLSearchParams(window.location.search).has('atlas');
+        if (hasSharedAtlas || randomArchiveRequestedRef.current || items.length === 0) return;
+        randomArchiveRequestedRef.current = true;
+
+        const illustratedItems = items.filter((item) => item.image && item.explodedImage);
+        const completePool = illustratedItems.length > 0 ? illustratedItems : items;
+        let previousKey = '';
+        try {
+          previousKey = window.sessionStorage.getItem('explode-anything:last-random-atlas') ?? '';
+        } catch {
+          // Storage may be unavailable in strict privacy modes; random loading still works.
+        }
+        const choices = completePool.length > 1
+          ? completePool.filter((item) => item.cacheKey !== previousKey)
+          : completePool;
+        const randomItem = choices[Math.floor(Math.random() * choices.length)];
+        if (!randomItem) return;
+        try {
+          window.sessionStorage.setItem('explode-anything:last-random-atlas', randomItem.cacheKey);
+        } catch {
+          // The selected archive can still open without remembering the previous choice.
+        }
+        trackAnalytics('random_archive_open', { atlas: randomItem.subject, cacheKey: randomItem.cacheKey });
+        void openGalleryAtlas(randomItem);
+      })
       .catch(() => undefined)
       .finally(() => setGalleryLoading(false));
   }, []);

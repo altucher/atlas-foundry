@@ -128,6 +128,10 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /loading="lazy"/);
   assert.match(page, /fetchPriority="high"/);
   assert.match(page, /explode > 0\.04 && <div className="foundry-part-layers"/);
+  assert.match(page, /explode-anything:last-random-atlas/);
+  assert.match(page, /hasSharedAtlas \|\| randomArchiveRequestedRef\.current/);
+  assert.match(page, /item\.image && item\.explodedImage/);
+  assert.match(page, /random_archive_open/);
   assert.match(humanPage, /Share anatomy explosion/);
   assert.match(humanPage, /Copy link/);
   assert.match(humanPage, /selection/);
