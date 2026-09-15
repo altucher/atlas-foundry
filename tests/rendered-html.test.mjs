@@ -136,6 +136,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /hasSharedAtlas \|\| randomArchiveRequestedRef\.current/);
   assert.match(page, /item\.image && item\.explodedImage/);
   assert.match(page, /random_archive_open/);
+  assert.match(page, /gallery-full-title/);
+  assert.match(page, /title=\{item\.subject\}/);
   assert.match(humanPage, /Share anatomy explosion/);
   assert.match(humanPage, /Copy link/);
   assert.match(humanPage, /selection/);
@@ -166,7 +168,8 @@ test("ships encrypted, private analytics without exposing the admin secret", asy
   assert.match(styles, /foundry-assembly\.rich-assembled \{[^}]*aspect-ratio: 16 \/ 9/);
   assert.match(styles, /foundry-assembly\.rich-assembled img \{[^}]*height: 100%/);
   assert.match(styles, /foundry-examples button \{ min-height: 44px/);
-  assert.match(styles, /foundry-share-trigger \{ min-width: 116px; height: 48px; padding-inline: 14px; font-size: 12px/);
+  assert.match(styles, /foundry-share-trigger \{ min-width: 116px; height: 48px; padding-inline: 14px; font-size: 14px/);
+  assert.match(styles, /foundry-gallery-card:hover \.gallery-full-title/);
   assert.match(styles, /foundry-hotspot \{ min-width: 44px; min-height: 44px/);
   assert.match(styles, /foundry-slider \[data-slot=slider\] \{ min-height: 44px/);
   assert.match(styles, /foundry-stage \{ min-height: clamp\(590px, 76dvh, 650px\)/);

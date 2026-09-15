@@ -347,7 +347,7 @@ a { color: inherit; }
 .foundry-gallery-head h2 { margin: 7px 0 0; color: #dcd5c8; font-family: Georgia, "Times New Roman", serif; font-size: 19px; font-weight: 400; letter-spacing: -.02em; }
 .foundry-gallery-head > small { color: #64675f; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; letter-spacing: .15em; }
 .foundry-gallery-track { display: grid; grid-auto-columns: minmax(250px, 310px); grid-auto-flow: column; gap: 9px; overflow-x: auto; padding-bottom: 5px; scrollbar-width: thin; }
-.foundry-gallery-card { min-width: 0; height: 104px; display: grid; grid-template-columns: 105px minmax(0, 1fr) 13px; align-items: center; gap: 12px; padding: 8px; border: 1px solid #e8dfcf1c; background: #11120fee; color: inherit; text-align: left; text-decoration: none; transition: border-color .18s, background .18s, transform .18s; }
+.foundry-gallery-card { position: relative; min-width: 0; height: 104px; display: grid; grid-template-columns: 105px minmax(0, 1fr) 13px; align-items: center; gap: 12px; padding: 8px; border: 1px solid #e8dfcf1c; background: #11120fee; color: inherit; text-align: left; text-decoration: none; transition: border-color .18s, background .18s, transform .18s; }
 .foundry-gallery-card:hover { border-color: #cdbb8d55; background: #181913; transform: translateY(-1px); }
 .foundry-gallery-card:disabled { opacity: .5; }
 .gallery-image { width: 105px; height: 86px; display: grid; place-items: center; overflow: hidden; border: 1px solid #e8dfcf13; background: #090a08; }
@@ -359,6 +359,9 @@ a { color: inherit; }
 .gallery-card-copy strong { overflow: hidden; color: #ddd6c9; font-family: Georgia, "Times New Roman", serif; font-size: 16px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .gallery-card-copy em { overflow: hidden; color: #696c64; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 6px; font-style: normal; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .foundry-gallery-card > svg { width: 11px; color: #69685f; }
+.gallery-full-title { position: absolute; z-index: 4; inset: 7px; display: flex; align-items: center; padding: 14px 17px; border: 1px solid #d7c48c52; background: #11120ff5; box-shadow: 0 12px 30px #000b; color: #f1ebdc; font-family: Georgia, "Times New Roman", serif; font-size: 17px; line-height: 1.22; opacity: 0; overflow-wrap: anywhere; pointer-events: none; transform: translateY(3px); transition: opacity .16s, transform .16s; }
+.foundry-gallery-card:hover .gallery-full-title,
+.foundry-gallery-card:focus-visible .gallery-full-title { opacity: 1; transform: translateY(0); }
 
 .foundry-workbench { position: relative; z-index: 2; min-height: 720px; display: grid; grid-template-columns: 225px minmax(480px, 1fr) 285px; margin: 0 clamp(18px, 2.5vw, 40px); border-inline: 1px solid var(--foundry-line); }
 .foundry-index, .foundry-detail { min-width: 0; padding: 25px 20px; background: #0c0d0bd9; }
@@ -409,7 +412,7 @@ a { color: inherit; }
 .foundry-stage-head { position: absolute; z-index: 8; top: 21px; left: 24px; right: 24px; display: flex; justify-content: space-between; color: #6c6f67; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; letter-spacing: .15em; }
 .foundry-stage-actions { display: flex; align-items: center; gap: 12px; }
 .foundry-share-control { position: relative; margin-top: -13px; }
-.foundry-share-trigger { min-width: 104px; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border: 1px solid #efe0a9; border-radius: 5px; color: #17150f; background: linear-gradient(135deg, #eadba6, #c8af70); box-shadow: 0 0 0 1px #fff2c31f, 0 8px 24px #d0b46d2b; font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; cursor: pointer; transition: color .18s, border-color .18s, background .18s, box-shadow .18s, transform .18s; }
+.foundry-share-trigger { min-width: 104px; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border: 1px solid #efe0a9; border-radius: 5px; color: #17150f; background: linear-gradient(135deg, #eadba6, #c8af70); box-shadow: 0 0 0 1px #fff2c31f, 0 8px 24px #d0b46d2b; font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; cursor: pointer; transition: color .18s, border-color .18s, background .18s, box-shadow .18s, transform .18s; }
 .foundry-share-trigger:hover { color: #0d0c08; border-color: #fff2bd; background: linear-gradient(135deg, #fff0ba, #d7bc76); box-shadow: 0 0 0 1px #fff2c33d, 0 10px 32px #d0b46d52; transform: translateY(-1px); }
 .foundry-share-trigger:disabled { opacity: .35; cursor: default; }
 .foundry-share-trigger svg { width: 14px; height: 14px; stroke-width: 2.2; }
@@ -642,7 +645,7 @@ a { color: inherit; }
   .foundry-stage-head { left: 13px; right: 13px; font-size: 6px; }
   .foundry-stage-actions { gap: 7px; }
   .foundry-stage-actions > span { display: none; }
-  .foundry-share-trigger { min-width: 96px; height: 34px; padding-inline: 11px; font-size: 9px; }
+  .foundry-share-trigger { min-width: 96px; height: 34px; padding-inline: 11px; font-size: 11px; }
   .foundry-share-menu { width: 176px; }
   .foundry-slider { bottom: 18px; }
   .foundry-detail { min-height: 0; padding: 23px 18px 27px; }
@@ -859,7 +862,7 @@ a { color: inherit; }
 
   .foundry-stage { min-height: clamp(590px, 76dvh, 650px); }
   .foundry-stage-head { top: 14px; font-size: 9px; }
-  .foundry-share-trigger { min-width: 116px; height: 48px; padding-inline: 14px; font-size: 12px; }
+  .foundry-share-trigger { min-width: 116px; height: 48px; padding-inline: 14px; font-size: 14px; }
   .foundry-share-trigger svg { width: 16px; height: 16px; }
   .foundry-share-menu { width: 196px; }
   .foundry-share-menu button { min-height: 46px; font-size: 10px; }

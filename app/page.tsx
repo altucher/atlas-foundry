@@ -644,18 +644,20 @@ export default function FoundryHome() {
           <small>{galleryLoading ? 'CHECKING ARCHIVE…' : `${gallery.length + 2} ATLASES AVAILABLE`}</small>
         </div>
         <div className="foundry-gallery-track">
-          <button type="button" className="foundry-gallery-card" onClick={() => openCuratedAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.')}>
+          <button type="button" className="foundry-gallery-card" title="Tesla electric vehicle" onClick={() => openCuratedAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.')}>
             <span className="gallery-image"><img src="/tesla-exploded-v2.jpg" alt="Exploded Tesla systems atlas" /></span>
             <span className="gallery-card-copy"><small>CURATED / ENGINEERED PRODUCT</small><strong>Tesla</strong><em>{TESLA_DEMO.parts.length} parts · {new Set(TESLA_DEMO.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.company))).size} vendors</em></span>
             <ChevronRight />
+            <span className="gallery-full-title" role="tooltip">Tesla electric vehicle</span>
           </button>
-          <Link className="foundry-gallery-card" href="/human">
+          <Link className="foundry-gallery-card" href="/human" title="Adult male anatomy">
             <span className="gallery-image portrait"><img src="/og.png" alt="Verified adult male anatomy atlas" /></span>
             <span className="gallery-card-copy"><small>VERIFIED / BODYParts3D</small><strong>Adult male anatomy</strong><em>Official mesh edition</em></span>
             <ChevronRight />
+            <span className="gallery-full-title" role="tooltip">Adult male anatomy</span>
           </Link>
           {gallery.map((item) => (
-            <button type="button" className="foundry-gallery-card" key={item.cacheKey} onClick={() => void openGalleryAtlas(item)} disabled={generating}>
+            <button type="button" className="foundry-gallery-card" key={item.cacheKey} title={item.subject} onClick={() => void openGalleryAtlas(item)} disabled={generating}>
               <span className={`gallery-image${item.imageOrientation === 'portrait' ? ' portrait' : ''}`}>
                 {item.explodedImage ?? item.image ? (
                   <img
@@ -669,6 +671,7 @@ export default function FoundryHome() {
               </span>
               <span className="gallery-card-copy"><small>{item.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION ? `SAVED / ${item.category}` : 'SAVED / RESEARCH REFRESH'}</small><strong>{item.subject}</strong><em>{item.partCount} parts · {item.supplierCount} vendors</em></span>
               <ChevronRight />
+              <span className="gallery-full-title" role="tooltip">{item.subject}</span>
             </button>
           ))}
         </div>
