@@ -533,7 +533,7 @@ export default function FoundryHome() {
     }
   }
 
-  async function shareExplosion(method: 'copy' | 'native') {
+  async function shareExplosion(method: 'copy' | 'native' | 'x') {
     const isTesla = atlas.mode === 'curated' && /tesla/i.test(atlas.subject);
     const atlasKey = atlas.cacheKey ?? (isTesla ? 'tesla' : '');
     if (!atlasKey) {
@@ -553,7 +553,13 @@ export default function FoundryHome() {
       ? `Explore ${selectedPart.name} inside the ${atlas.subject} explosion.`
       : `Explore the ${atlas.subject} component explosion.`;
     try {
-      if (method === 'native' && typeof navigator.share === 'function') {
+      if (method === 'x') {
+        const intent = new URL('https://x.com/intent/post');
+        intent.searchParams.set('text', text);
+        intent.searchParams.set('url', url.toString());
+        window.open(intent.toString(), '_blank', 'noopener,noreferrer');
+        setShareStatus('shared');
+      } else if (method === 'native' && typeof navigator.share === 'function') {
         await navigator.share({ title, text, url: url.toString() });
         setShareStatus('shared');
       } else {
@@ -561,7 +567,12 @@ export default function FoundryHome() {
         setShareStatus('copied');
       }
       setShareMenuOpen(false);
-      trackAnalytics('atlas_share', { atlas: atlas.subject, component: selectedPart?.name ?? null, amount: Math.round(explode * 100), method: method === 'native' && typeof navigator.share === 'function' ? 'native' : 'clipboard' });
+      trackAnalytics('atlas_share', {
+        atlas: atlas.subject,
+        component: selectedPart?.name ?? null,
+        amount: Math.round(explode * 100),
+        method: method === 'x' ? 'x' : method === 'native' && typeof navigator.share === 'function' ? 'native' : 'clipboard',
+      });
       window.setTimeout(() => setShareStatus('idle'), 2200);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -750,10 +761,11 @@ export default function FoundryHome() {
                   aria-expanded={shareMenuOpen}
                 >
                   {shareStatus === 'idle' ? <Share2 /> : <Check />}
-                  <span>{shareStatus === 'shared' ? 'SHARED' : shareStatus === 'copied' ? 'LINK COPIED' : 'SHARE'}</span>
+                  <span>{shareStatus === 'shared' ? 'SHARED' : shareStatus === 'copied' ? 'LINK COPIED' : 'SHARE THIS'}</span>
                 </button>
                 {shareMenuOpen && (
                   <div className="foundry-share-menu" role="menu" aria-label="Share options">
+                    <button type="button" role="menuitem" className="share-on-x" onClick={() => void shareExplosion('x')}><ExternalLink /><span>SHARE ON X</span></button>
                     <button type="button" role="menuitem" onClick={() => void shareExplosion('copy')}><Copy /><span>COPY LINK</span></button>
                     <button type="button" role="menuitem" onClick={() => void shareExplosion('native')}><Send /><span>SHARE VIA…</span></button>
                   </div>
