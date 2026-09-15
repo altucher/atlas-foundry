@@ -44,5 +44,8 @@ assert.equal(subjectMatchesRequest('Clorox', 'Clorox™ Disinfecting Bleach'), t
 assert.equal(subjectMatchesRequest('Boeing 787', 'Boeing 787 Dreamliner'), true);
 assert.equal(subjectMatchesRequest('Boeing 787', 'Tesla Model Y'), false);
 assert.equal(subjectMatchesRequest('MacBook battery', 'Apple notebook display'), false);
+assert.equal(subjectMatchesRequest('a Mac 512k', 'Macintosh 512K'), true);
+assert.equal(subjectMatchesRequest('a Mac 512k', 'Macintosh Classic'), false);
 assert.equal(canonicalResearchPrompt('an eight mattress'), 'Eight Sleep smart mattress system');
+assert.equal(canonicalResearchPrompt(' a Mac 512k'), 'Macintosh 512K');
 console.log('Tap, drag, multitouch, cancellation, and empty-view checks passed.');

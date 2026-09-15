@@ -79,6 +79,7 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(subjectIdentity, /term\.length > 1 \|\| \/\^\\d\$\//);
   assert.match(subjectIdentity, /Twinkies → Twinkie/);
   assert.match(subjectIdentity, /replace\(\/\[™®©\]\/g/);
+  assert.match(subjectIdentity, /Macintosh 512K/);
   assert.match(generationRoute, /Rejected a mismatched saved record/);
   assert.match(generationRoute, /Research identity mismatch/);
   assert.match(generationRoute, /retrying automatically/);

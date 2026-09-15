@@ -2,6 +2,8 @@ const stopWords = new Set(['a', 'an', 'the', 'of', 'and', 'for', 'with', 'system
 
 function tokenVariants(term: string) {
   const variants = new Set([term]);
+  if (term === 'mac') variants.add('macintosh');
+  if (term === 'macintosh') variants.add('mac');
   if (term.length > 4 && term.endsWith('ies')) {
     // Covers ordinary plurals (batteries → battery) and names whose singular
     // already ends in "ie" (Twinkies → Twinkie).
@@ -54,6 +56,12 @@ export function canonicalResearchPrompt(prompt: string) {
   // explicit enough to avoid treating the number as a mattress size or quantity.
   if (/^\s*(?:(?:a|an|the)\s+)?(?:eight|8)(?:\s+sleep)?\s+mattress(?:es)?\s*$/i.test(prompt)) {
     return 'Eight Sleep smart mattress system';
+  }
+  // The 1984 Macintosh 512K is routinely called the Mac 512K. Use the
+  // official product name for research and cache identity without broadening
+  // the request to a different compact Macintosh model.
+  if (/^\s*(?:(?:a|an|the)\s+)?(?:apple\s+)?(?:mac|macintosh)\s*512\s*k\s*$/i.test(prompt)) {
+    return 'Macintosh 512K';
   }
   return prompt;
 }
