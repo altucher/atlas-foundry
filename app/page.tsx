@@ -613,7 +613,15 @@ export default function FoundryHome() {
           {gallery.map((item) => (
             <button type="button" className="foundry-gallery-card" key={item.cacheKey} onClick={() => void openGalleryAtlas(item)} disabled={generating}>
               <span className={`gallery-image${item.imageOrientation === 'portrait' ? ' portrait' : ''}`}>
-                {item.explodedImage ?? item.image ? <img src={item.explodedImage ?? item.image} alt={`Exploded ${item.subject} atlas`} /> : <Box />}
+                {item.explodedImage ?? item.image ? (
+                  <img
+                    src={item.explodedImage ?? item.image}
+                    alt={`Exploded ${item.subject} atlas`}
+                    loading="lazy"
+                    decoding="async"
+                    fetchPriority="low"
+                  />
+                ) : <Box />}
               </span>
               <span className="gallery-card-copy"><small>{item.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION ? `SAVED / ${item.category}` : 'SAVED / RESEARCH REFRESH'}</small><strong>{item.subject}</strong><em>{item.partCount} parts · {item.supplierCount} vendors</em></span>
               <ChevronRight />
@@ -741,7 +749,15 @@ export default function FoundryHome() {
               transform: `translate(-50%, -50%) scale(${1 - explode * (hasIllustratedExplosion ? 0.06 : 0.16)})`,
             }}
           >
-            {atlas.image ? <img src={atlas.image} alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`} /> : (
+            {atlas.image ? (
+              <img
+                src={atlas.image}
+                alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`}
+                loading="eager"
+                decoding="async"
+                fetchPriority="high"
+              />
+            ) : (
               <div className="foundry-visual-fallback">
                 {generating ? <LoaderCircle className="spin" /> : <Box />}
                 <span>{generating ? 'ASSEMBLED IMAGE GENERATING' : atlas.parts.length ? 'ASSEMBLED IMAGE UNAVAILABLE' : 'BUILD INTERRUPTED — TRY AGAIN'}</span>
@@ -760,6 +776,9 @@ export default function FoundryHome() {
                 className="foundry-exploded-base"
                 src={atlas.explodedImage}
                 alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`}
+                loading="eager"
+                decoding="async"
+                fetchPriority="high"
                 style={{
                   opacity: showingEveryPart
                     ? Math.max(0, Math.min(1, (explode - 0.7) / 0.3))
@@ -785,7 +804,7 @@ export default function FoundryHome() {
                   })}
                 </svg>
               )}
-              <div className="foundry-part-layers" aria-hidden="true">
+              {explode > 0.04 && <div className="foundry-part-layers" aria-hidden="true">
                 {visibleParts.flatMap((part) => {
                   const hotspot = atlas.hotspots?.[part.id];
                   if (!hotspot) return [];
@@ -811,12 +830,12 @@ export default function FoundryHome() {
                           transformOrigin: `${region.x}% ${region.y}%`,
                         }}
                       >
-                        <img src={atlas.explodedImage} alt="" />
+                        <img src={atlas.explodedImage} alt="" loading="lazy" decoding="async" fetchPriority="low" />
                       </div>
                     );
                   });
                 })}
-              </div>
+              </div>}
               <span className="foundry-art-badge" style={{ opacity: Math.max(0, Math.min(1, (explode - 0.16) * 3)) }}>AI-ILLUSTRATED · DOCUMENTED SYSTEMS · NOT SERVICE GEOMETRY</span>
               <div className="foundry-hotspots" aria-label="Clickable component regions" style={{ opacity: Math.max(0, Math.min(1, (explode - 0.12) * 4)) }}>
                 {visibleParts.flatMap((part) => {

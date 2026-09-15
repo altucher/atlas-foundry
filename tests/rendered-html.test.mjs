@@ -125,6 +125,9 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /atlas_share/);
   assert.match(page, /Share \$\{atlas\.subject\} explosion/);
   assert.match(page, /COPY LINK/);
+  assert.match(page, /loading="lazy"/);
+  assert.match(page, /fetchPriority="high"/);
+  assert.match(page, /explode > 0\.04 && <div className="foundry-part-layers"/);
   assert.match(humanPage, /Share anatomy explosion/);
   assert.match(humanPage, /Copy link/);
   assert.match(humanPage, /selection/);
