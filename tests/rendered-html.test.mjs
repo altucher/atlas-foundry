@@ -127,6 +127,7 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /SHARE ON X/);
   assert.match(page, /https:\/\/x\.com\/intent\/post/);
   assert.match(page, /COPY LINK/);
+  assert.doesNotMatch(page, /SHARE THIS/);
   assert.match(page, /loading="lazy"/);
   assert.match(page, /fetchPriority="high"/);
   assert.match(page, /explode > 0\.04 && <div className="foundry-part-layers"/);
@@ -164,7 +165,7 @@ test("ships encrypted, private analytics without exposing the admin secret", asy
   assert.match(styles, /foundry-assembly\.rich-assembled \{[^}]*aspect-ratio: 16 \/ 9/);
   assert.match(styles, /foundry-assembly\.rich-assembled img \{[^}]*height: 100%/);
   assert.match(styles, /foundry-examples button \{ min-height: 44px/);
-  assert.match(styles, /foundry-share-trigger \{ min-width: 116px; height: 48px/);
+  assert.match(styles, /foundry-share-trigger \{ min-width: 116px; height: 48px; padding-inline: 14px; font-size: 12px/);
   assert.match(styles, /foundry-hotspot \{ min-width: 44px; min-height: 44px/);
   assert.match(styles, /foundry-slider \[data-slot=slider\] \{ min-height: 44px/);
   assert.match(styles, /foundry-stage \{ min-height: clamp\(590px, 76dvh, 650px\)/);

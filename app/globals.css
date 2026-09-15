@@ -409,7 +409,7 @@ a { color: inherit; }
 .foundry-stage-head { position: absolute; z-index: 8; top: 21px; left: 24px; right: 24px; display: flex; justify-content: space-between; color: #6c6f67; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; letter-spacing: .15em; }
 .foundry-stage-actions { display: flex; align-items: center; gap: 12px; }
 .foundry-share-control { position: relative; margin-top: -13px; }
-.foundry-share-trigger { min-width: 104px; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border: 1px solid #efe0a9; border-radius: 5px; color: #17150f; background: linear-gradient(135deg, #eadba6, #c8af70); box-shadow: 0 0 0 1px #fff2c31f, 0 8px 24px #d0b46d2b; font: 700 8px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; cursor: pointer; transition: color .18s, border-color .18s, background .18s, box-shadow .18s, transform .18s; }
+.foundry-share-trigger { min-width: 104px; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border: 1px solid #efe0a9; border-radius: 5px; color: #17150f; background: linear-gradient(135deg, #eadba6, #c8af70); box-shadow: 0 0 0 1px #fff2c31f, 0 8px 24px #d0b46d2b; font: 700 10px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; cursor: pointer; transition: color .18s, border-color .18s, background .18s, box-shadow .18s, transform .18s; }
 .foundry-share-trigger:hover { color: #0d0c08; border-color: #fff2bd; background: linear-gradient(135deg, #fff0ba, #d7bc76); box-shadow: 0 0 0 1px #fff2c33d, 0 10px 32px #d0b46d52; transform: translateY(-1px); }
 .foundry-share-trigger:disabled { opacity: .35; cursor: default; }
 .foundry-share-trigger svg { width: 14px; height: 14px; stroke-width: 2.2; }
@@ -642,7 +642,7 @@ a { color: inherit; }
   .foundry-stage-head { left: 13px; right: 13px; font-size: 6px; }
   .foundry-stage-actions { gap: 7px; }
   .foundry-stage-actions > span { display: none; }
-  .foundry-share-trigger { min-width: 96px; height: 34px; padding-inline: 11px; font-size: 7px; }
+  .foundry-share-trigger { min-width: 96px; height: 34px; padding-inline: 11px; font-size: 9px; }
   .foundry-share-menu { width: 176px; }
   .foundry-slider { bottom: 18px; }
   .foundry-detail { min-height: 0; padding: 23px 18px 27px; }
@@ -859,7 +859,7 @@ a { color: inherit; }
 
   .foundry-stage { min-height: clamp(590px, 76dvh, 650px); }
   .foundry-stage-head { top: 14px; font-size: 9px; }
-  .foundry-share-trigger { min-width: 116px; height: 48px; padding-inline: 14px; font-size: 10px; }
+  .foundry-share-trigger { min-width: 116px; height: 48px; padding-inline: 14px; font-size: 12px; }
   .foundry-share-trigger svg { width: 16px; height: 16px; }
   .foundry-share-menu { width: 196px; }
   .foundry-share-menu button { min-height: 46px; font-size: 10px; }

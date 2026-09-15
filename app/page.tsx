@@ -761,7 +761,7 @@ export default function FoundryHome() {
                   aria-expanded={shareMenuOpen}
                 >
                   {shareStatus === 'idle' ? <Share2 /> : <Check />}
-                  <span>{shareStatus === 'shared' ? 'SHARED' : shareStatus === 'copied' ? 'LINK COPIED' : 'SHARE THIS'}</span>
+                  <span>{shareStatus === 'shared' ? 'SHARED' : shareStatus === 'copied' ? 'LINK COPIED' : 'SHARE'}</span>
                 </button>
                 {shareMenuOpen && (
                   <div className="foundry-share-menu" role="menu" aria-label="Share options">
