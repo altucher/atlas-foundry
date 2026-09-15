@@ -3,6 +3,7 @@ import { Agent, fetch as undiciFetch } from 'undici';
 
 import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
+import { canonicalResearchPrompt, subjectMatchesRequest } from '@/app/subject-identity';
 
 export const runtime = 'nodejs';
 // Deep generic architectures can spend several minutes in source-backed research
@@ -401,45 +402,6 @@ function archiveSlug(value: string) {
 
 function archiveNameKey(value: string) {
   return value.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function subjectMatchesRequest(requested: string, returned: string) {
-  const stopWords = new Set(['a', 'an', 'the', 'of', 'and', 'for', 'with', 'system', 'systems', 'component', 'components', 'atlas']);
-  const terms = (value: string) => new Set(value
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/\bzero\b/g, '0')
-    .replace(/\bone\b/g, '1')
-    .replace(/\btwo\b/g, '2')
-    .replace(/\bthree\b/g, '3')
-    .replace(/\bfour\b/g, '4')
-    .replace(/\bfive\b/g, '5')
-    .replace(/\bsix\b/g, '6')
-    .replace(/\bseven\b/g, '7')
-    .replace(/\beight\b/g, '8')
-    .replace(/\bnine\b/g, '9')
-    .replace(/\bten\b/g, '10')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .split(/\s+/)
-    .filter((term) => (term.length > 1 || /^\d$/.test(term)) && !stopWords.has(term)));
-  const requestedTerms = terms(requested);
-  const returnedTerms = terms(returned);
-  if (!requestedTerms.size || !returnedTerms.size) return false;
-  const sharedTerms = [...requestedTerms].filter((term) => returnedTerms.has(term));
-  // A single coincidental token (a model number such as "787", for example)
-  // must never be enough to turn a Boeing request into a different product.
-  const requiredMatches = requestedTerms.size === 1 ? 1 : Math.ceil(requestedTerms.size * 0.6);
-  return sharedTerms.length >= requiredMatches;
-}
-
-function canonicalResearchPrompt(prompt: string) {
-  // “Eight mattress” is a common shorthand for the Eight Sleep smart mattress
-  // system. Preserve the user's text in the UI while making the research target
-  // explicit enough to avoid treating the number as a mattress size or quantity.
-  if (/^\s*(?:(?:a|an|the)\s+)?(?:eight|8)(?:\s+sleep)?\s+mattress(?:es)?\s*$/i.test(prompt)) {
-    return 'Eight Sleep smart mattress system';
-  }
-  return prompt;
 }
 
 type ArchiveLayerDefinition = { readonly id: string; readonly label: string; readonly focus: string };
@@ -1004,7 +966,13 @@ async function generateImage(
         size: imageOrientation === 'portrait' ? '1024x1536' : '1536x1024', quality: 'high', output_format: 'webp',
       }),
     });
-    if (!response.ok) throw new Error(`Image generation failed (${response.status}).`);
+    if (!response.ok) {
+      if (attempt === 0 && response.status >= 500) {
+        retryDirection = '\n\nThe image service interrupted the prior render. Recreate the requested composition from scratch.';
+        continue;
+      }
+      throw new Error(`Image generation failed (${response.status}).`);
+    }
     const payload = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
     const generated = payload.data?.[0];
     const image = generated?.b64_json ? `data:image/webp;base64,${generated.b64_json}` : generated?.url;

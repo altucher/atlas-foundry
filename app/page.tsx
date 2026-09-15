@@ -740,7 +740,12 @@ export default function FoundryHome() {
               transform: `translate(-50%, -50%) scale(${1 - explode * (hasIllustratedExplosion ? 0.06 : 0.16)})`,
             }}
           >
-            {atlas.image ? <img src={atlas.image} alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`} /> : <div className="foundry-visual-fallback"><Box /><span>ASSEMBLED IMAGE UNAVAILABLE</span></div>}
+            {atlas.image ? <img src={atlas.image} alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`} /> : (
+              <div className="foundry-visual-fallback">
+                {generating ? <LoaderCircle className="spin" /> : <Box />}
+                <span>{generating ? 'ASSEMBLED IMAGE GENERATING' : atlas.parts.length ? 'ASSEMBLED IMAGE UNAVAILABLE' : 'BUILD INTERRUPTED — TRY AGAIN'}</span>
+              </div>
+            )}
             <span className="assembly-axis axis-x" /><span className="assembly-axis axis-y" />
           </div>
           {hasIllustratedExplosion && (

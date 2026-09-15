@@ -36,12 +36,13 @@ test("server-renders the Atlas Foundry workbench", async () => {
 });
 
 test("keeps credentials server-side and implements shared gallery storage", async () => {
-  const [page, humanPage, generationRoute, galleryRoute, store] = await Promise.all([
+  const [page, humanPage, generationRoute, galleryRoute, store, subjectIdentity] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/human/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/generate-atlas/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/gallery/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/atlas-store.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/subject-identity.ts", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(page, /NEXT_PUBLIC_(OPENAI|AI_GATEWAY)/);
@@ -74,8 +75,10 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /atlas_image_quality/);
   assert.match(generationRoute, /ZERO intact or usable assembled copies/);
   assert.match(generationRoute, /subjectMatchesRequest/);
-  assert.match(generationRoute, /Math\.ceil\(requestedTerms\.size \* 0\.6\)/);
-  assert.match(generationRoute, /term\.length > 1 \|\| \/\^\\d\$\//);
+  assert.match(subjectIdentity, /Math\.ceil\(requestedTerms\.length \* 0\.6\)/);
+  assert.match(subjectIdentity, /term\.length > 1 \|\| \/\^\\d\$\//);
+  assert.match(subjectIdentity, /Twinkies → Twinkie/);
+  assert.match(subjectIdentity, /replace\(\/\[™®©\]\/g/);
   assert.match(generationRoute, /Rejected a mismatched saved record/);
   assert.match(generationRoute, /Research identity mismatch/);
   assert.match(generationRoute, /retrying automatically/);

@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {createExplosionLayout} from '../app/explosion-layout.ts';
 import {PointerTap} from '../app/pointer-tap.ts';
 import {atlasTools} from '../app/agent-tools.ts';
+import {canonicalResearchPrompt, subjectMatchesRequest} from '../app/subject-identity.ts';
 
 for (const file of ['atlas.json']) {
   const atlas=JSON.parse(await readFile(new URL(`../public/models/${file}`,import.meta.url)));
@@ -38,4 +39,10 @@ tap.down(1,10,10,12);tap.down(2,20,20,12);assert.equal(tap.up(2,20,20),false);as
 tap.down(1,10,10,5);tap.cancel(1);assert.equal(tap.up(1,10,10),false);
 tap.down(1,10,10,5);assert.equal(tap.up(1,10,10),true);
 assert.equal(createExplosionLayout([]).cells.size,0);
+assert.equal(subjectMatchesRequest('a twinkie', 'Hostess Twinkies™ snack cake'), true);
+assert.equal(subjectMatchesRequest('Clorox', 'Clorox™ Disinfecting Bleach'), true);
+assert.equal(subjectMatchesRequest('Boeing 787', 'Boeing 787 Dreamliner'), true);
+assert.equal(subjectMatchesRequest('Boeing 787', 'Tesla Model Y'), false);
+assert.equal(subjectMatchesRequest('MacBook battery', 'Apple notebook display'), false);
+assert.equal(canonicalResearchPrompt('an eight mattress'), 'Eight Sleep smart mattress system');
 console.log('Tap, drag, multitouch, cancellation, and empty-view checks passed.');
