@@ -8,11 +8,13 @@ import {
   Check,
   ChevronRight,
   CircleAlert,
+  Copy,
   ExternalLink,
   Layers3,
   LoaderCircle,
   Play,
   Search,
+  Send,
   Share2,
   Sparkles,
   X,
@@ -168,6 +170,7 @@ export default function FoundryHome() {
   const [buildJournal, setBuildJournal] = useState<BuildJournalEntry[]>([]);
   const [notice, setNotice] = useState('');
   const [trailerOpen, setTrailerOpen] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared'>('idle');
   const lastExplosionEventRef = useRef(-1);
 
@@ -309,11 +312,15 @@ export default function FoundryHome() {
   }, [activeLayer, atlas.subject, explode]);
 
   useEffect(() => {
-    if (!trailerOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setTrailerOpen(false); };
+    if (!trailerOpen && !shareMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setTrailerOpen(false);
+      setShareMenuOpen(false);
+    };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [trailerOpen]);
+  }, [shareMenuOpen, trailerOpen]);
 
   function loadAtlas(nextAtlas: FoundryAtlas, message: string) {
     setAtlas(nextAtlas);
@@ -492,7 +499,7 @@ export default function FoundryHome() {
     }
   }
 
-  async function shareExplosion() {
+  async function shareExplosion(method: 'copy' | 'native') {
     const isTesla = atlas.mode === 'curated' && /tesla/i.test(atlas.subject);
     const atlasKey = atlas.cacheKey ?? (isTesla ? 'tesla' : '');
     if (!atlasKey) {
@@ -511,16 +518,16 @@ export default function FoundryHome() {
     const text = selectedPart
       ? `Explore ${selectedPart.name} inside the ${atlas.subject} explosion.`
       : `Explore the ${atlas.subject} component explosion.`;
-    const useNativeShare = typeof navigator.share === 'function';
     try {
-      if (useNativeShare) {
+      if (method === 'native' && typeof navigator.share === 'function') {
         await navigator.share({ title, text, url: url.toString() });
         setShareStatus('shared');
       } else {
         await navigator.clipboard.writeText(url.toString());
         setShareStatus('copied');
       }
-      trackAnalytics('atlas_share', { atlas: atlas.subject, component: selectedPart?.name ?? null, amount: Math.round(explode * 100), method: useNativeShare ? 'native' : 'clipboard' });
+      setShareMenuOpen(false);
+      trackAnalytics('atlas_share', { atlas: atlas.subject, component: selectedPart?.name ?? null, amount: Math.round(explode * 100), method: method === 'native' && typeof navigator.share === 'function' ? 'native' : 'clipboard' });
       window.setTimeout(() => setShareStatus('idle'), 2200);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
@@ -690,10 +697,26 @@ export default function FoundryHome() {
             <span>{activeVendor ? `${activeVendor.toUpperCase()} SUPPLY MAP · CLICK A PART` : stageInstruction}</span>
             <div className="foundry-stage-actions">
               <span>{String(visibleParts.length).padStart(2, '0')} VISIBLE / {String(atlas.parts.length).padStart(2, '0')} TOTAL</span>
-              <button type="button" onClick={() => void shareExplosion()} disabled={generating || !atlas.parts.length} aria-label={`Share ${atlas.subject} explosion`}>
-                {shareStatus === 'idle' ? <Share2 /> : <Check />}
-                <span>{shareStatus === 'shared' ? 'SHARED' : shareStatus === 'copied' ? 'LINK COPIED' : 'SHARE'}</span>
-              </button>
+              <div className="foundry-share-control">
+                <button
+                  type="button"
+                  className="foundry-share-trigger"
+                  onClick={() => setShareMenuOpen((open) => !open)}
+                  disabled={generating || !atlas.parts.length}
+                  aria-label={`Share ${atlas.subject} explosion`}
+                  aria-haspopup="menu"
+                  aria-expanded={shareMenuOpen}
+                >
+                  {shareStatus === 'idle' ? <Share2 /> : <Check />}
+                  <span>{shareStatus === 'shared' ? 'SHARED' : shareStatus === 'copied' ? 'LINK COPIED' : 'SHARE'}</span>
+                </button>
+                {shareMenuOpen && (
+                  <div className="foundry-share-menu" role="menu" aria-label="Share options">
+                    <button type="button" role="menuitem" onClick={() => void shareExplosion('copy')}><Copy /><span>COPY LINK</span></button>
+                    <button type="button" role="menuitem" onClick={() => void shareExplosion('native')}><Send /><span>SHARE VIA…</span></button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           <div className="foundry-stage-grid" aria-hidden="true" />

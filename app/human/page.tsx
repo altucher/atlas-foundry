@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   CircleHelp,
+  Copy,
   Focus,
   Info,
   Layers3,
@@ -14,6 +15,7 @@ import {
   RotateCcw,
   RotateCw,
   Search,
+  Send,
   Share2,
   Sparkles,
   X,
@@ -81,6 +83,7 @@ export default function Home() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [selectedLabel, setSelectedLabel] = useState<{ name: string; id: string } | null>(null);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared'>('idle');
 
   useEffect(() => {
@@ -104,7 +107,10 @@ export default function Home() {
         setPanel('search');
         requestAnimationFrame(() => searchInput.current?.focus());
       }
-      if (event.key === 'Escape') setPanel(null);
+      if (event.key === 'Escape') {
+        setPanel(null);
+        setShareMenuOpen(false);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -233,22 +239,22 @@ export default function Home() {
     setQuery('');
   };
 
-  const shareAnatomy = async () => {
+  const shareAnatomy = async (method: 'copy' | 'native') => {
     const url = new URL('/human', window.location.origin);
     url.searchParams.set('explode', String(Math.round(state.explode * 100)));
     url.searchParams.set('visible', state.visible.join(','));
     url.searchParams.set('view', state.view);
     if (state.isolate) url.searchParams.set('isolate', '1');
     if (selectedLabel?.id ?? selectedPart?.id) url.searchParams.set('selection', selectedLabel?.id ?? selectedPart?.id ?? '');
-    const useNativeShare = typeof navigator.share === 'function';
     try {
-      if (useNativeShare) {
+      if (method === 'native' && typeof navigator.share === 'function') {
         await navigator.share({ title: 'Adult male anatomy — Explode Anything', text: 'Explore this interactive anatomy explosion.', url: url.toString() });
         setShareStatus('shared');
       } else {
         await navigator.clipboard.writeText(url.toString());
         setShareStatus('copied');
       }
+      setShareMenuOpen(false);
       window.setTimeout(() => setShareStatus('idle'), 2200);
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return;
@@ -287,9 +293,17 @@ export default function Home() {
         <Button variant="outline" onClick={() => setPanel(panel === 'search' ? null : 'search')} aria-label="Search structures">
           <Search /> <span>Search atlas</span> <kbd>/</kbd>
         </Button>
-        <Button variant="outline" onClick={() => void shareAnatomy()} aria-label="Share anatomy explosion">
-          {shareStatus === 'idle' ? <Share2 /> : <Check />} <span>{shareStatus === 'shared' ? 'Shared' : shareStatus === 'copied' ? 'Copied' : 'Share'}</span>
-        </Button>
+        <div className="anatomy-share-control">
+          <Button variant="outline" onClick={() => setShareMenuOpen((open) => !open)} aria-label="Share anatomy explosion" aria-haspopup="menu" aria-expanded={shareMenuOpen}>
+            {shareStatus === 'idle' ? <Share2 /> : <Check />} <span>{shareStatus === 'shared' ? 'Shared' : shareStatus === 'copied' ? 'Copied' : 'Share'}</span>
+          </Button>
+          {shareMenuOpen && (
+            <div className="anatomy-share-menu" role="menu" aria-label="Share options">
+              <button type="button" role="menuitem" onClick={() => void shareAnatomy('copy')}><Copy /><span>Copy link</span></button>
+              <button type="button" role="menuitem" onClick={() => void shareAnatomy('native')}><Send /><span>Share via…</span></button>
+            </div>
+          )}
+        </div>
         <Button variant="outline" size="icon" onClick={() => setPanel(panel === 'about' ? null : 'about')} aria-label="About this atlas">
           <Info />
         </Button>
