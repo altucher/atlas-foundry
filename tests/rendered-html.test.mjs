@@ -117,6 +117,7 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /SUPPLIER RESEARCH/);
   assert.match(page, /phase: 'enrich'/);
   assert.match(page, /explode-anything-trailer\.mp4/);
+  assert.match(page, /explode-anything-trailer\.mp4\?v=3/);
   assert.match(page, /COMPONENT AUDIT/);
   assert.match(page, /Open evidence for/);
   assert.match(page, /RESEARCH LAYERS/);

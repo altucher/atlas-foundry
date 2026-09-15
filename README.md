@@ -2,7 +2,7 @@
 
 Explode Anything turns a subject into a sourced, clickable component atlas. Enter an object such as “espresso machine,” “Tesla,” or “data center”; the server researches reliable public sources, builds a deep component catalog, generates matched photorealistic assembled and exploded views, and maps the documented parts into a clickable visual index.
 
-The home-page header includes a silent, subtitle-led 27-second product trailer demonstrating the Tesla explosion slider, component records, data-center research layers, an iPhone teardown, supplier evidence, public-company tickers, and finance links.
+The home-page header includes a voice-free, subtitle-led 27-second cinematic product trailer. It uses rapid dark-studio cuts to demonstrate the Tesla, iPhone, and data-center explosions, component connections, source-backed records, supplier evidence, public-company intelligence, and finance links.
 
 **Live demo:** [build-an-interactive-3d-human-atlas.vercel.app](https://build-an-interactive-3d-human-atlas.vercel.app)
 
