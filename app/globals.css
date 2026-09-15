@@ -809,3 +809,95 @@ a { color: inherit; }
 .foundry-object-overview > p { color: #b2b2a8; font-size: 12px; }
 
 .foundry-part-node.context { pointer-events: none; filter: grayscale(.7); box-shadow: none; }
+
+/* Phone ergonomics: preserve the catalog density on desktop while giving
+   thumbs and small screens a genuinely comfortable reading surface. */
+@media (max-width: 760px) {
+  .foundry-header { height: 72px; padding-inline: 12px; }
+  .foundry-brand { min-height: 44px; gap: 10px; }
+  .foundry-brand small { font-size: 9px; }
+  .trailer-link,
+  .human-link { width: 44px; min-width: 44px; height: 44px; justify-content: center; padding: 0; }
+
+  .foundry-command { padding: 32px 16px 30px; }
+  .foundry-eyebrow { font-size: 10px; letter-spacing: .15em; }
+  .command-copy h1 { font-size: clamp(39px, 11.5vw, 48px); line-height: .98; }
+  .command-copy p { color: #aaa9a0; font-size: 13px; line-height: 1.65; }
+  .foundry-form { height: 66px; padding-block: 8px; }
+  .foundry-form input,
+  .foundry-form button { height: 48px; }
+  .foundry-examples { margin-top: 8px; gap: 7px; }
+  .foundry-examples > span { font-size: 9px; }
+  .foundry-examples button { min-height: 44px; padding: 0 11px; font-size: 11px; }
+
+  .foundry-gallery { padding-block: 23px 25px; }
+  .foundry-gallery-head h2 { font-size: 22px; }
+  .foundry-gallery-track { grid-auto-columns: min(78vw, 300px); scroll-snap-type: x proximity; }
+  .foundry-gallery-card { height: 116px; scroll-snap-align: start; }
+  .gallery-card-copy small,
+  .gallery-card-copy em { font-size: 9px; }
+  .gallery-card-copy strong { font-size: 18px; }
+
+  .foundry-index { padding: 22px 14px 18px; }
+  .foundry-section-number,
+  .foundry-subject > span { font-size: 10px; }
+  .foundry-subject h2 { font-size: 30px; line-height: 1.05; }
+  .foundry-subject p { font-size: 10px; line-height: 1.6; }
+  .foundry-part-search { height: 48px; }
+  .foundry-part-search input { height: 46px; font-size: 16px; }
+  .foundry-layer-index > button,
+  .foundry-system-list button,
+  .vendor-index-toggle,
+  .vendor-index-list > button { min-height: 44px; font-size: 11px; }
+  .foundry-layer-index small,
+  .foundry-system-list small,
+  .vendor-index-toggle small,
+  .vendor-index-list em,
+  .vendor-index-list small { font-size: 9px; }
+
+  .foundry-stage { min-height: clamp(590px, 76dvh, 650px); }
+  .foundry-stage-head { top: 14px; font-size: 9px; }
+  .foundry-share-trigger { min-width: 72px; height: 44px; padding-inline: 11px; font-size: 10px; }
+  .foundry-share-trigger svg { width: 14px; height: 14px; }
+  .foundry-hotspot { min-width: 44px; min-height: 44px; }
+  .foundry-hotspot > i { width: 32px; height: 32px; font-size: 9px; }
+  .foundry-hotspot > span { max-width: 132px; font-size: 10px; }
+  .foundry-part-node { min-height: 48px; }
+  .foundry-part-node strong { font-size: 11px; }
+  .foundry-part-node small { font-size: 9px; }
+
+  .foundry-slider { bottom: 14px; width: calc(100% - 24px); padding: 11px 14px 9px; }
+  .foundry-slider > div:first-child,
+  .foundry-slider output,
+  .foundry-slider-labels { font-size: 10px; }
+  .foundry-slider [data-slot=slider] { min-height: 44px; display: flex; align-items: center; }
+  .foundry-slider [data-slot=slider-thumb] { width: 22px; height: 22px; }
+  .foundry-art-badge { bottom: -34px; font-size: 9px; }
+
+  .foundry-detail { padding: 24px 18px 29px; }
+  .foundry-detail .detail-index-row { margin-top: 10px; }
+  .detail-index-row small,
+  .detail-index-row code,
+  .foundry-detail dt,
+  .foundry-detail dd { font-size: 10px; }
+  .foundry-detail > p,
+  .foundry-object-overview > p { font-size: 13px; line-height: 1.7; }
+  .foundry-supplier a,
+  .foundry-citations > a,
+  .source-register a { min-height: 44px; }
+  .foundry-footnotes > div { padding: 20px 16px; }
+}
+
+@media (max-width: 767px) {
+  .system-item,
+  .system-item > button,
+  .preset-row button,
+  .view-rail button { min-height: 44px; }
+  .view-rail button { width: 44px; height: 44px; }
+  .systems-trigger,
+  .dock-reset { min-width: 44px; }
+  .explode-copy,
+  .detail-system,
+  .detail-meta strong,
+  .disclaimer { font-size: 10px; }
+}

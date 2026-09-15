@@ -154,4 +154,9 @@ test("ships encrypted, private analytics without exposing the admin secret", asy
   assert.match(dashboard, /No names or raw IP addresses are stored/);
   assert.match(styles, /foundry-assembly\.rich-assembled \{[^}]*aspect-ratio: 16 \/ 9/);
   assert.match(styles, /foundry-assembly\.rich-assembled img \{[^}]*height: 100%/);
+  assert.match(styles, /foundry-examples button \{ min-height: 44px/);
+  assert.match(styles, /foundry-share-trigger \{ min-width: 72px; height: 44px/);
+  assert.match(styles, /foundry-hotspot \{ min-width: 44px; min-height: 44px/);
+  assert.match(styles, /foundry-slider \[data-slot=slider\] \{ min-height: 44px/);
+  assert.match(styles, /foundry-stage \{ min-height: clamp\(590px, 76dvh, 650px\)/);
 });
