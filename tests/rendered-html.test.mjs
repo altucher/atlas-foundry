@@ -105,6 +105,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(store, /normalized === 'falcon-9' \|\| normalized === 'spacex-falcon-9'/);
   assert.match(store, /falcon-9-block-5-launch-vehicle/);
   assert.match(store, /eight-sleep-mattress/);
+  assert.match(store, /normalized === 'mac-512k'/);
+  assert.match(store, /seenSubjects/);
   assert.match(page, /scrollIntoView/);
   assert.match(page, /pendingAtlas\(subject\)/);
   assert.match(page, /payload\.draft && payload\.atlas\.cacheKey\) void refreshGallery/);

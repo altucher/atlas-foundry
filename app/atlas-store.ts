@@ -20,6 +20,7 @@ export function cacheKeyForPrompt(prompt: string) {
   if (normalized === 'data-center' || normalized === 'data-centers') return 'data-center';
   if (normalized === 'falcon-9' || normalized === 'spacex-falcon-9') return 'falcon-9';
   if (normalized === '8-mattress' || normalized === '8-sleep-mattress') return 'eight-sleep-mattress';
+  if (normalized === 'mac-512k') return 'macintosh-512k';
   return normalized || 'atlas';
 }
 
@@ -187,8 +188,14 @@ export async function listGalleryAtlases() {
     const fallbackKey = pathParts[pathParts.length - 2] ?? 'atlas';
     return atlas ? { item: galleryItem(atlas, fallbackKey), uploadedAt: blob.uploadedAt } : null;
   }));
-  return atlases
+  const sorted = atlases
     .filter((record): record is NonNullable<typeof record> => Boolean(record))
-    .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime())
-    .map((record) => record.item);
+    .sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
+  const seenSubjects = new Set<string>();
+  return sorted.flatMap((record) => {
+    const subjectKey = cacheKeyForPrompt(record.item.subject);
+    if (seenSubjects.has(subjectKey)) return [];
+    seenSubjects.add(subjectKey);
+    return [record.item];
+  });
 }
