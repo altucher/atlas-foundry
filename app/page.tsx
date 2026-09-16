@@ -181,6 +181,7 @@ export default function FoundryHome() {
   const [enriching, setEnriching] = useState(false);
   const [buildSubject, setBuildSubject] = useState('');
   const [buildJournal, setBuildJournal] = useState<BuildJournalEntry[]>([]);
+  const [buildError, setBuildError] = useState('');
   const [notice, setNotice] = useState('');
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [shareMenuOpen, setShareMenuOpen] = useState(false);
@@ -393,6 +394,7 @@ export default function FoundryHome() {
 
   function loadAtlas(nextAtlas: FoundryAtlas, message: string) {
     setAtlas(nextAtlas);
+    setBuildError('');
     setExplode(0);
     setActiveLayer(initialLayerForAtlas(nextAtlas));
     setActiveSystem('All systems');
@@ -429,6 +431,7 @@ export default function FoundryHome() {
     setSelectedId('');
     setBuildSubject(subject);
     setBuildJournal([{ stage: 'request', message: `Preparing a source-backed build plan for ${subject}…` }]);
+    setBuildError('');
     setGenerating(true);
     setEnriching(false);
     setNotice('Building a fast first draft now. Detailed supplier and IP research will continue after it appears.');
@@ -454,11 +457,10 @@ export default function FoundryHome() {
           setBuildJournal((entries) => [...entries, { stage: 'recovery', message: 'The first connection ended before delivery. Retrying automatically with a compact research pass…' }].slice(-14));
           continue;
         }
-        const canRecover = attempt === 0
-          && resultStatus >= 500
-          && !['NOT_CONFIGURED', 'CREDITS_EXHAUSTED', 'AUTHENTICATION_FAILED', 'MODEL_UNAVAILABLE'].includes(payload.code ?? '');
-        if (!canRecover) break;
-        setBuildJournal((entries) => [...entries, { stage: 'recovery', message: 'The full first pass did not finish. Retrying automatically with a smaller source-backed build…' }].slice(-14));
+        // The server already makes three model-level research attempts. A second
+        // HTTP request is reserved for a genuinely broken response connection so
+        // provider failures do not consume another public rate-limit slot.
+        break;
       }
       if (resultStatus < 200 || resultStatus >= 300 || !payload.atlas) {
         if (payload.code === 'NOT_CONFIGURED') {
@@ -518,6 +520,7 @@ export default function FoundryHome() {
         subtitle: 'Build did not complete',
         summary: `${current.subject} remains the active request. ${message}`,
       }));
+      setBuildError(message);
       setNotice(message);
       trackAnalytics('atlas_result', { query: subject, status: 'failed', error: message });
     } finally {
@@ -854,7 +857,10 @@ export default function FoundryHome() {
                 {generating ? <LoaderCircle className="spin" /> : <Box />}
                 <span>{generating ? 'ASSEMBLED IMAGE GENERATING' : atlas.parts.length ? 'ASSEMBLED IMAGE UNAVAILABLE' : 'BUILD PAUSED'}</span>
                 {!generating && atlas.parts.length === 0 && (
-                  <button type="button" onClick={() => void generateAtlas(atlas.subject)}>RETRY BUILD</button>
+                  <>
+                    <p>{buildError || 'The request did not return a component record. No incomplete atlas was saved.'}</p>
+                    <button type="button" onClick={() => void generateAtlas(atlas.subject)}>RETRY BUILD</button>
+                  </>
                 )}
               </div>
             )}

@@ -146,6 +146,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /SHOW ALL COMPONENTS/);
   assert.match(page, /recovery: attempt === 1/);
   assert.match(page, /RETRY BUILD/);
+  assert.match(page, /buildError \|\| 'The request did not return a component record/);
+  assert.match(page, /reserved for a genuinely broken response connection/);
   assert.doesNotMatch(page, /BUILD INTERRUPTED — TRY AGAIN/);
   assert.match(page, /random_archive_open/);
   assert.match(page, /gallery-full-title/);
