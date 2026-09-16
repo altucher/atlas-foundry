@@ -434,15 +434,32 @@ export default function FoundryHome() {
     setNotice('Building a fast first draft now. Detailed supplier and IP research will continue after it appears.');
     let draftDelivered = false;
     try {
-      const response = await fetch('/api/generate-atlas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
-        body: JSON.stringify({ prompt: subject, phase: 'draft' }),
-        signal: abortController.signal,
-      });
-      const { payload, resultStatus } = await readAtlasResponse(response, (stage, message) => {
-        if (requestId === activeRequestRef.current) setBuildJournal((entries) => [...entries, { stage, message }].slice(-14));
-      });
+      let payload: AtlasPayload = {};
+      let resultStatus = 500;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const response = await fetch('/api/generate-atlas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
+            body: JSON.stringify({ prompt: subject, phase: 'draft', recovery: attempt === 1 }),
+            signal: abortController.signal,
+          });
+          const result = await readAtlasResponse(response, (stage, message) => {
+            if (requestId === activeRequestRef.current) setBuildJournal((entries) => [...entries, { stage, message }].slice(-14));
+          });
+          payload = result.payload;
+          resultStatus = result.resultStatus;
+        } catch (error) {
+          if (abortController.signal.aborted || attempt === 1) throw error;
+          setBuildJournal((entries) => [...entries, { stage: 'recovery', message: 'The first connection ended before delivery. Retrying automatically with a compact research pass…' }].slice(-14));
+          continue;
+        }
+        const canRecover = attempt === 0
+          && resultStatus >= 500
+          && !['NOT_CONFIGURED', 'CREDITS_EXHAUSTED', 'AUTHENTICATION_FAILED', 'MODEL_UNAVAILABLE'].includes(payload.code ?? '');
+        if (!canRecover) break;
+        setBuildJournal((entries) => [...entries, { stage: 'recovery', message: 'The full first pass did not finish. Retrying automatically with a smaller source-backed build…' }].slice(-14));
+      }
       if (resultStatus < 200 || resultStatus >= 300 || !payload.atlas) {
         if (payload.code === 'NOT_CONFIGURED') {
           throw new Error('Live generation needs an OPENAI_API_KEY on the server. The curated Tesla and verified human atlases are ready to show now.');
@@ -835,7 +852,10 @@ export default function FoundryHome() {
             ) : (
               <div className="foundry-visual-fallback">
                 {generating ? <LoaderCircle className="spin" /> : <Box />}
-                <span>{generating ? 'ASSEMBLED IMAGE GENERATING' : atlas.parts.length ? 'ASSEMBLED IMAGE UNAVAILABLE' : 'BUILD INTERRUPTED — TRY AGAIN'}</span>
+                <span>{generating ? 'ASSEMBLED IMAGE GENERATING' : atlas.parts.length ? 'ASSEMBLED IMAGE UNAVAILABLE' : 'BUILD PAUSED'}</span>
+                {!generating && atlas.parts.length === 0 && (
+                  <button type="button" onClick={() => void generateAtlas(atlas.subject)}>RETRY BUILD</button>
+                )}
               </div>
             )}
             <span className="assembly-axis axis-x" /><span className="assembly-axis axis-y" />

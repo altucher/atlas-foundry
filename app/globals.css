@@ -447,6 +447,8 @@ a { color: inherit; }
 .foundry-assembly.rich-assembled.portrait img { max-height: 540px; object-fit: contain; }
 .foundry-visual-fallback { min-height: 330px; display: grid; place-content: center; justify-items: center; gap: 12px; border: 1px solid #e6dcc819; background: radial-gradient(circle, #252720 0, #0d0e0c 70%); color: #6f7269; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 7px; letter-spacing: .14em; }
 .foundry-visual-fallback svg { width: 35px; height: 35px; color: #a99c7e; stroke-width: 1; }
+.foundry-visual-fallback button { min-height: 42px; padding: 0 16px; border: 1px solid #c6b78f70; background: #1b1c17; color: #dfd2b1; font: inherit; letter-spacing: .14em; }
+.foundry-visual-fallback button:hover, .foundry-visual-fallback button:focus-visible { border-color: #d7c48cb8; background: #272820; color: #fff7e7; outline: none; }
 .assembly-axis { position: absolute; z-index: -1; display: block; background: #d8caae23; }
 .assembly-axis::before, .assembly-axis::after { content: ""; position: absolute; width: 3px; height: 3px; border: 1px solid #b5a98e65; border-radius: 50%; }
 .axis-x { left: -7%; right: -7%; top: 70%; height: 1px; }

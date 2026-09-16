@@ -92,7 +92,7 @@ const aiDispatcher = new Agent({
   connectTimeout: 30_000,
 });
 
-type ProgressStage = 'cache' | 'research' | 'source' | 'inventory' | 'vendor' | 'render' | 'mapping' | 'save' | 'done';
+type ProgressStage = 'cache' | 'research' | 'recovery' | 'source' | 'inventory' | 'vendor' | 'render' | 'mapping' | 'save' | 'done';
 type ProgressReporter = (entry: { stage: ProgressStage; message: string }) => void;
 
 type AiConnection = {
@@ -1090,10 +1090,12 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
 export async function POST(request: Request) {
   let prompt = '';
   let phase: 'draft' | 'enrich' = 'draft';
+  let recovery = false;
   try {
-    const body = (await request.json()) as { prompt?: unknown; phase?: unknown };
+    const body = (await request.json()) as { prompt?: unknown; phase?: unknown; recovery?: unknown };
     prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
     phase = body.phase === 'enrich' ? 'enrich' : 'draft';
+    recovery = body.recovery === true;
   } catch {
     return NextResponse.json({ error: 'Send a JSON body with a prompt.' }, { status: 400 });
   }
@@ -1115,7 +1117,7 @@ export async function POST(request: Request) {
             ...(request.headers.get('x-atlas-force-refresh') === '1' ? { 'X-Atlas-Force-Refresh': '1' } : {}),
             ...(request.headers.get('x-atlas-deep-build') === '1' ? { 'X-Atlas-Deep-Build': '1' } : {}),
           },
-          body: JSON.stringify({ prompt, phase }),
+          body: JSON.stringify({ prompt, phase, recovery }),
           cache: 'no-store',
         });
         return new Response(response.body, {
@@ -1262,15 +1264,29 @@ Use connections to explain architecture. For each part, list up to ten directly 
 Set imageOrientation to portrait for strongly vertical subjects such as launch vehicles, towers, standing anatomy, or long upright tools; otherwise use landscape. The visualPrompt should describe the object's documented external appearance, materials, proportions, and a canonical three-quarter camera view suitable for a consistent photorealistic assembled/exploded image pair. State the limits of the atlas and distinguish a conceptual catalog from an engineering drawing, service manual, clinical tool, literally exhaustive parts database, or investment recommendation.`;
 
   try {
-    report({ stage: 'research', message: `Fast first pass · mapping ${prompt} with ${defaultDraftModel}…` });
-    const responsePayload = await generateDraftResearchWithRecovery(connection, {
+    report({
+      stage: 'research',
+      message: recovery
+        ? `Compact recovery pass · rebuilding ${prompt} with a smaller source window…`
+        : `Fast first pass · mapping ${prompt} with ${defaultDraftModel}…`,
+    });
+    const researchBody = {
         model: connection.draftModel,
         reasoning: { effort: 'low' },
         instructions,
         input: `Build a component atlas for: ${researchPrompt}`,
         tools: [{ type: 'web_search', search_context_size: 'low' }],
         text: { format: { type: 'json_schema', name: 'component_atlas', strict: true, schema: atlasSchema } },
-    }, report);
+    };
+    const responsePayload = recovery
+      ? await generateResearchInBackground(connection, {
+          ...researchBody,
+          model: connection.supplierResearchModel,
+          input: `${researchBody.input}\n\nCompact recovery: return 12–20 high-value components and 2–8 authoritative sources. Keep every field concise, complete the valid schema first, and leave deeper supplier research for the separate enrichment pass.`,
+          max_tool_calls: 8,
+          max_output_tokens: 20_000,
+        }, report, { stage: 'recovery', message: 'Compact recovery research is still running' })
+      : await generateDraftResearchWithRecovery(connection, researchBody, report);
     const rawAtlas = JSON.parse(extractOutputText(responsePayload)) as Omit<FoundryAtlas, 'mode'> & { visualPrompt: string };
     const normalized = normalizeAtlas(rawAtlas);
     if (!subjectMatchesRequest(researchPrompt, normalized.subject)) {

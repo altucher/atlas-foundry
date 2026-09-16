@@ -84,6 +84,8 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(generationRoute, /Research identity mismatch/);
   assert.match(generationRoute, /retrying automatically/);
   assert.match(generationRoute, /generateDraftResearchWithRecovery/);
+  assert.match(generationRoute, /Compact recovery pass/);
+  assert.match(generationRoute, /recovery = body\.recovery === true/);
   assert.match(generationRoute, /Compact recovery research is still running/);
   assert.match(generationRoute, /canonicalResearchPrompt/);
   assert.match(generationRoute, /CREDITS_EXHAUSTED/);
@@ -142,6 +144,9 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /initialLayerForAtlas/);
   assert.match(page, /atlas\.parts\.length > 0 && visibleParts\.length === 0/);
   assert.match(page, /SHOW ALL COMPONENTS/);
+  assert.match(page, /recovery: attempt === 1/);
+  assert.match(page, /RETRY BUILD/);
+  assert.doesNotMatch(page, /BUILD INTERRUPTED — TRY AGAIN/);
   assert.match(page, /random_archive_open/);
   assert.match(page, /gallery-full-title/);
   assert.match(page, /title=\{item\.subject\}/);
