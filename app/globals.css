@@ -489,7 +489,9 @@ a { color: inherit; }
 .foundry-part-node > span { min-width: 0; display: flex; justify-content: center; flex-direction: column; gap: 3px; padding: 7px 4px 7px 0; }
 .foundry-part-node strong { overflow: hidden; font-size: 9px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .foundry-part-node small { overflow: hidden; color: #64675f; font-size: 7px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-.foundry-empty { position: absolute; left: 50%; top: 50%; z-index: 5; transform: translate(-50%, -50%); color: #6f726a; font-size: 10px; }
+.foundry-empty { position: absolute; left: 50%; top: 50%; z-index: 5; display: flex; align-items: center; flex-direction: column; gap: 12px; width: min(290px, calc(100% - 44px)); transform: translate(-50%, -50%); color: #989b91; font-size: 11px; line-height: 1.4; text-align: center; }
+.foundry-empty button { min-height: 40px; padding: 0 14px; border: 1px solid #c6b78f66; background: #1a1b17ee; color: #d8cba9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; letter-spacing: .12em; }
+.foundry-empty button:hover, .foundry-empty button:focus-visible { border-color: #d7c48cb3; background: #24251f; color: #f1e8d5; outline: none; }
 .foundry-slider { position: absolute; z-index: 10; left: 50%; bottom: 25px; width: min(430px, calc(100% - 45px)); transform: translateX(-50%); padding: 13px 16px 11px; border-radius: 4px; }
 .foundry-slider > div:first-child { display: flex; align-items: center; gap: 7px; margin-bottom: 11px; color: #a8a69a; font-size: 8px; letter-spacing: .15em; }
 .foundry-slider > div:first-child svg { width: 12px; color: #c0af88; }

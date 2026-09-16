@@ -139,6 +139,9 @@ test("keeps credentials server-side and implements shared gallery storage", asyn
   assert.match(page, /illustratedGalleryItems/);
   assert.match(page, /item\.image\?\.trim\(\) && item\.explodedImage\?\.trim\(\)/);
   assert.doesNotMatch(page, /title="Adult male anatomy"/);
+  assert.match(page, /initialLayerForAtlas/);
+  assert.match(page, /atlas\.parts\.length > 0 && visibleParts\.length === 0/);
+  assert.match(page, /SHOW ALL COMPONENTS/);
   assert.match(page, /random_archive_open/);
   assert.match(page, /gallery-full-title/);
   assert.match(page, /title=\{item\.subject\}/);

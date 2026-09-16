@@ -32,6 +32,15 @@ function illustratedGalleryItems(items: AtlasGalleryItem[]) {
   return items.filter((item) => Boolean(item.image?.trim() && item.explodedImage?.trim()));
 }
 
+function partLayer(part: AtlasPart) {
+  return part.archiveLayer ?? 'Overview';
+}
+
+function initialLayerForAtlas(atlas: FoundryAtlas) {
+  const overview = atlas.archive?.layers.find((layer) => layer.id === 'overview')?.label;
+  return overview && atlas.parts.some((part) => partLayer(part) === overview) ? overview : 'All layers';
+}
+
 function supplierSummary(part: AtlasPart) {
   const suppliers = part.suppliers ?? [];
   if (!suppliers.length) return '';
@@ -179,7 +188,12 @@ export default function FoundryHome() {
   const lastExplosionEventRef = useRef(-1);
   const randomArchiveRequestedRef = useRef(false);
 
-  const archiveLayers = useMemo(() => atlas.archive?.layers.map((layer) => layer.label) ?? [], [atlas.archive]);
+  const archiveLayers = useMemo(
+    () => atlas.archive?.layers
+      .map((layer) => layer.label)
+      .filter((label) => atlas.parts.some((part) => partLayer(part) === label)) ?? [],
+    [atlas.archive, atlas.parts],
+  );
   const systems = useMemo(() => {
     const inLayer = activeLayer === 'All layers' ? atlas.parts : atlas.parts.filter((part) => (part.archiveLayer ?? 'Overview') === activeLayer);
     return ['All systems', ...Array.from(new Set(inLayer.map((part) => part.system)))];
@@ -294,10 +308,29 @@ export default function FoundryHome() {
       const requestedSystem = params.get('system');
       const requestedVendor = params.get('vendor');
       const requestedExplosion = Number(params.get('explode'));
-      if (partId && nextAtlas.parts.some((part) => part.id === partId)) setSelectedId(partId);
-      if (requestedLayer && (requestedLayer === 'All layers' || nextAtlas.archive?.layers.some((layer) => layer.label === requestedLayer))) setActiveLayer(requestedLayer);
-      if (requestedSystem && (requestedSystem === 'All systems' || nextAtlas.parts.some((part) => part.system === requestedSystem))) setActiveSystem(requestedSystem);
-      if (requestedVendor && nextAtlas.parts.some((part) => part.suppliers?.some((supplier) => supplier.company === requestedVendor))) setActiveVendor(requestedVendor);
+      const validRequestedLayer = requestedLayer === 'All layers'
+        || Boolean(requestedLayer && nextAtlas.parts.some((part) => partLayer(part) === requestedLayer));
+      const nextLayer = validRequestedLayer ? requestedLayer! : initialLayerForAtlas(nextAtlas);
+      const layerParts = nextLayer === 'All layers'
+        ? nextAtlas.parts
+        : nextAtlas.parts.filter((part) => partLayer(part) === nextLayer);
+      const validRequestedSystem = requestedSystem === 'All systems'
+        || Boolean(requestedSystem && layerParts.some((part) => part.system === requestedSystem));
+      const nextSystem = validRequestedSystem ? requestedSystem! : 'All systems';
+      const systemParts = nextSystem === 'All systems'
+        ? layerParts
+        : layerParts.filter((part) => part.system === nextSystem);
+      const nextVendor = requestedVendor && systemParts.some((part) => part.suppliers?.some((supplier) => supplier.company === requestedVendor))
+        ? requestedVendor
+        : null;
+      const viewParts = nextVendor
+        ? systemParts.filter((part) => part.suppliers?.some((supplier) => supplier.company === nextVendor))
+        : systemParts;
+      setActiveLayer(nextLayer);
+      setActiveSystem(nextSystem);
+      setActiveVendor(nextVendor);
+      setPartQuery('');
+      setSelectedId(partId && viewParts.some((part) => part.id === partId) ? partId : '');
       if (Number.isFinite(requestedExplosion)) setExplode(Math.max(0, Math.min(1, requestedExplosion / 100)));
       requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     };
@@ -361,8 +394,7 @@ export default function FoundryHome() {
   function loadAtlas(nextAtlas: FoundryAtlas, message: string) {
     setAtlas(nextAtlas);
     setExplode(0);
-    const initialLayer = nextAtlas.archive?.layers.find((layer) => layer.id === 'overview')?.label ?? 'All layers';
-    setActiveLayer(initialLayer);
+    setActiveLayer(initialLayerForAtlas(nextAtlas));
     setActiveSystem('All systems');
     setActiveVendor(null);
     setPartQuery('');
@@ -951,7 +983,18 @@ export default function FoundryHome() {
               );
             })}
           </div>}
-          {visibleParts.length === 0 && <div className="foundry-empty">No components match this filter.</div>}
+          {!generating && atlas.parts.length > 0 && visibleParts.length === 0 && (
+            <div className="foundry-empty">
+              <span>No components match the current filters.</span>
+              <button type="button" onClick={() => {
+                setActiveLayer('All layers');
+                setActiveSystem('All systems');
+                setActiveVendor(null);
+                setPartQuery('');
+                setSelectedId('');
+              }}>SHOW ALL COMPONENTS</button>
+            </div>
+          )}
           <div className="foundry-slider glass-panel">
             <div><Layers3 /><span>EXPLOSION</span><output>{Math.round(explode * 100)}%</output></div>
             <Slider aria-label="Explosion amount" min={0} max={100} step={1} value={[explode * 100]} onValueChange={(value) => setExplode((Array.isArray(value) ? value[0] : value) / 100)} />
