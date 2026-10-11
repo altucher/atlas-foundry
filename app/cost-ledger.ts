@@ -66,12 +66,18 @@ export type UsageRecord = {
   calls: CostCall[];
 };
 
-type Ledger = { buildId: string; phase: string; key: string; who: BuildWho; calls: CostCall[]; startedAt: number };
+type Ledger = { buildId: string; phase: string; key: string; who: BuildWho; calls: CostCall[]; startedAt: number; note?: string };
 
 const storage = new AsyncLocalStorage<Ledger>();
 
 export function runWithLedger<T>(phase: string, key: string, who: BuildWho, work: () => Promise<T>) {
   return storage.run({ buildId: randomUUID(), phase, key, who, calls: [], startedAt: Date.now() }, work);
+}
+
+/** the route can override the request's outcome label (for example a draft that was shown but not saved) */
+export function noteLedger(outcome: string) {
+  const ledger = storage.getStore();
+  if (ledger) ledger.note = outcome;
 }
 
 export function currentBuildId() {
@@ -183,11 +189,11 @@ export async function finishLedger(outcome: string) {
   const s = summarizeCalls(ledger.calls);
   const endedAt = new Date();
   const record: UsageRecord = {
-    buildId: ledger.buildId, key: ledger.key, phase: ledger.phase, outcome, who: ledger.who,
+    buildId: ledger.buildId, key: ledger.key, phase: ledger.phase, outcome: ledger.note ?? outcome, who: ledger.who,
     startedAt: new Date(ledger.startedAt).toISOString(), endedAt: endedAt.toISOString(), ms: endedAt.getTime() - ledger.startedAt,
     usd: s.usd, unpriced: s.unpriced, totals: s.totals, lines: s.lines, calls: ledger.calls,
   };
-  console.info(JSON.stringify({ atlas_cost: { buildId: record.buildId, key: record.key, phase: record.phase, outcome, who: record.who.kind, ms: record.ms, usd: record.usd, unpriced: record.unpriced, totals: record.totals } }));
+  console.info(JSON.stringify({ atlas_cost: { buildId: record.buildId, key: record.key, phase: record.phase, outcome: record.outcome, who: record.who.kind, ms: record.ms, usd: record.usd, unpriced: record.unpriced, totals: record.totals } }));
   if (hasSharedAtlasStore()) {
     try {
       await put(`${galleryRoot()}/_usage/${endedAt.toISOString().slice(0, 10)}/${record.buildId}.json`, JSON.stringify(record), {

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
-import { finishLedger, mergeBuildCost, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
+import { finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
 import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
@@ -1398,6 +1398,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       // visitor only (an admin test may keep a text-only draft with X-Atlas-Allow-Text-Only: 1). The build's usage is still recorded either way.
       if ((!image || !explodedImage) && !(isAdmin && request.headers.get('x-atlas-allow-text-only') === '1')) {
         cacheWarning = 'The first draft is ready, but it was not saved to the shared gallery because the matched image pair could not be generated.';
+        noteLedger('draft_not_saved_no_images');
         report({ stage: 'done', message: 'First draft ready; it was not saved because the images were unavailable.' });
       } else {
         report({ stage: 'save', message: 'Saving the first draft so deeper research can continue independently…' });
