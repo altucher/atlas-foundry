@@ -1,7 +1,7 @@
 // BUILD COST LEDGER (AI2 2026-10-11): every paid call a build makes (research, supplier batches, image generation, image QA, hotspot mapping) records its model,
 // tokens, web-search calls and images here, per request, through AsyncLocalStorage. A request logs one JSON line ("atlas_cost") and the saved atlas keeps
 // buildCost (per phase: draft, enrich, deep), so a build's cost can be read back later. Dollar figures need prices: set ATLAS_PRICE_TABLE to JSON like
-// {"gpt-5.4-mini":{"in":0.25,"out":2,"cachedIn":0.025,"search":10},"gpt-image-2.5-flare":{"image":0.2}} (USD per 1M tokens, per 1000 search calls, per image); models
+// {"gpt-5.4-mini":{"in":0.75,"out":4.5,"cachedIn":0.075,"search":10},"gpt-image-2.5-flare":{"image":0.19}} (USD per 1M tokens, per 1000 search calls, per image); models
 // without a price are listed under unpriced and add no dollars. Prices are NOT guessed here.
 import { AsyncLocalStorage } from 'node:async_hooks';
 
@@ -95,7 +95,7 @@ export function summarizeLedger(): { phase: string; at: string; lines: CostLine[
     if (!price) { unpriced.add(entry.model); continue; }
     priced += 1;
     usd += ((entry.inputTokens - entry.cachedInputTokens) * (price.in ?? 0) + entry.cachedInputTokens * (price.cachedIn ?? price.in ?? 0) + entry.outputTokens * (price.out ?? 0)) / 1e6
-      + (entry.webSearchCalls * (price.search ?? 0)) / 1000 + entry.images * (price.image ?? 0);
+      + (entry.webSearchCalls * (price.search ?? 0)) / 1000 + (entry.outputTokens > 0 ? 0 : entry.images * (price.image ?? 0)); // a per-image price applies only when the API reported no token usage for the image
   }
   return { phase: ledger.phase, at: new Date().toISOString(), lines, usd: priced ? Math.round(usd * 10000) / 10000 : null, unpriced: [...unpriced] };
 }
