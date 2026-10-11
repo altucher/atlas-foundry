@@ -89,6 +89,8 @@ const falconNineDeepLayers = [
     focus: 'Falcon 9 vehicle-to-pad and vehicle-to-mission interfaces: transporter-erector strongback connections, hold-down and release, propellant and helium loading interfaces, electrical and data umbilicals, purge and environmental control, launch mount flame interface, payload access, range and tracking links, recovery assets, and generation- or site-specific variations without treating ground equipment as flying hardware',
   },
 ] as const;
+// When the image service answers 'no credits', new builds are refused for ten minutes instead of spending text-research money on atlases that cannot get their images.
+let imagesDownUntil = 0;
 const aiDispatcher = new Agent({
   headersTimeout: 780_000,
   bodyTimeout: 780_000,
@@ -1001,6 +1003,10 @@ async function generateImage(
       }),
     });
     if (!response.ok) {
+      if (response.status === 429 || response.status === 402) {
+        const detail = await response.text().catch(() => '');
+        if (/insufficient_quota|no credits|credit_balance/i.test(detail)) imagesDownUntil = Date.now() + 10 * 60 * 1000;
+      }
       if (attempt === 0 && response.status >= 500) {
         retryDirection = '\n\nThe image service interrupted the prior render. Recreate the requested composition from scratch.';
         continue;
@@ -1209,6 +1215,9 @@ export async function POST(request: Request) {
     );
   }
 
+  if (phase === 'draft' && !isAdmin && Date.now() < imagesDownUntil) {
+    return NextResponse.json({ code: 'CREDITS_EXHAUSTED', error: 'Live generation is paused because the image service has no credits remaining. Saved gallery atlases remain available.' }, { status: 402 });
+  }
   if (phase === 'enrich') {
     // A finished current atlas needs no paid enrichment: serve it. Otherwise the enrich phase is limited per caller and per atlas.
     if (!isAdmin && cachedAtlas?.buildStage === 'complete' && cachedAtlas.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
