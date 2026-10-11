@@ -5,6 +5,8 @@
 // Env: TAO1_API_KEY (server only), TAO1_BASE_URL (default https://tao1.ai/v1), TAO1_MODEL (default tao-1), ATLAS_TEXT_PROVIDER=tao1 to turn it on.
 import { Agent, fetch as undiciFetch } from 'undici';
 
+import { currentBuildId } from '@/app/cost-ledger';
+
 export type Tao1Connection = { baseUrl: string; apiKey: string; model: string };
 
 const dispatcher = new Agent({ headersTimeout: 780_000, bodyTimeout: 780_000, connectTimeout: 30_000 });
@@ -49,7 +51,9 @@ ${JSON.stringify(schema)}`;
       dispatcher,
       method: 'POST',
       headers: { Authorization: `Bearer ${conn.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: conn.model, messages, max_tokens: maxOut, response_format: { type: 'json_object' } }),
+      // The TAO-1 API does not read a client X-Request-Id; metadata.session_id is how a call joins a ledger session (a scoped key forces its own session anyway). max_tokens and response_format are
+      // hints that the live API may ignore today, so the schema is also stated in the system prompt and the reply is parsed and repaired here.
+      body: JSON.stringify({ model: conn.model, messages, max_tokens: maxOut, response_format: { type: 'json_object' }, metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything' } }),
     });
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 300);
