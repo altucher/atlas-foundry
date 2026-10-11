@@ -546,6 +546,8 @@ function responseFailure(payload: Record<string, unknown>) {
 
 function researchConfigurationFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? '');
+  if (/^TAO-1 text call failed \((?:401|403)\)/.test(message)) return 'tao1_auth' as const;
+  if (/^TAO-1 text call failed \(402\)/.test(message)) return 'tao1_credits' as const;
   if (/no credits remaining|insufficient[_ ]quota|billing quota|add credits/i.test(message)) return 'credits' as const;
   if (/invalid api key|incorrect api key|authentication|unauthorized/i.test(message)) return 'authentication' as const;
   if (/model.+(?:not found|does not exist|not available|not supported)/i.test(message)) return 'model' as const;
@@ -1409,6 +1411,9 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
         code: 'CREDITS_EXHAUSTED',
         error: 'Live generation is paused because the OpenAI API account connected to this site has no credits remaining. Add API credits in OpenAI Platform billing, then retry. Saved gallery atlases remain available.',
       }, { status: 402 });
+    }
+    if (configurationFailure === 'tao1_auth' || configurationFailure === 'tao1_credits') {
+      return NextResponse.json({ code: configurationFailure === 'tao1_auth' ? 'TEXT_PROVIDER_AUTH_FAILED' : 'TEXT_PROVIDER_CREDITS', error: 'Live generation is paused because the text research service did not accept this site. Saved gallery atlases remain available.' }, { status: 503 });
     }
     if (configurationFailure === 'authentication') {
       return NextResponse.json({ code: 'AUTHENTICATION_FAILED', error: 'Live generation is paused because the server API key was rejected. Replace OPENAI_API_KEY in Vercel, then redeploy.' }, { status: 503 });
