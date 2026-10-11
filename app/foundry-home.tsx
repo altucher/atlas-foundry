@@ -300,7 +300,7 @@ export default function FoundryHome({ embed = false }: { embed?: boolean } = {})
           // The selected archive can still open without remembering the previous choice.
         }
         trackAnalytics('random_archive_open', { atlas: randomItem.subject, cacheKey: randomItem.cacheKey });
-        void openGalleryAtlas(randomItem);
+        void openGalleryAtlas(randomItem, false); // a plain visit keeps the headline and search in view; the random atlas sits below without scrolling
       })
       .catch(() => undefined)
       .finally(() => setGalleryLoading(false));
@@ -589,7 +589,7 @@ export default function FoundryHome({ embed = false }: { embed?: boolean } = {})
     }
   }
 
-  async function openGalleryAtlas(item: AtlasGalleryItem) {
+  async function openGalleryAtlas(item: AtlasGalleryItem, scrollToAtlas = true) {
     const requestId = activeRequestRef.current + 1;
     activeRequestRef.current = requestId;
     activeAbortRef.current?.abort();
@@ -609,7 +609,7 @@ export default function FoundryHome({ embed = false }: { embed?: boolean } = {})
     setEnriching(false);
     setNotice(`Opening ${item.subject} from the shared gallery…`);
     trackAnalytics('gallery_open', { atlas: item.subject, cacheKey: item.cacheKey, source: 'shared' });
-    requestAnimationFrame(() => !embed && workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    if (scrollToAtlas) requestAnimationFrame(() => !embed && workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     try {
       const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store', signal: abortController.signal });
       const payload = await response.json() as { atlas?: FoundryAtlas; error?: string };
