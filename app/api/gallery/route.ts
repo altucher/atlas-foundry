@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 
-import { cacheKeyForPrompt, hasSharedAtlasStore, listGalleryAtlases, loadGalleryAtlas } from '@/app/atlas-store';
+import { adminAuthorized } from '@/app/api-guard';
+import { cacheKeyForPrompt, hasSharedAtlasStore, listGalleryAtlases, loadGalleryAtlas, refreshGalleryIndex } from '@/app/atlas-store';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 function remoteGalleryUrl(request: Request) {
   const configured = process.env.ATLAS_CACHE_ORIGIN?.trim();
@@ -42,9 +44,10 @@ export async function GET(request: Request) {
         headers: { 'Cache-Control': 'no-store' },
       });
     }
-    const items = await listGalleryAtlases();
+    // ?refresh=1 with the admin header rebuilds the list index now (otherwise it refreshes on every save or after ten minutes)
+    const items = url.searchParams.get('refresh') === '1' && adminAuthorized(request) ? await refreshGalleryIndex() : await listGalleryAtlases();
     return NextResponse.json({ items }, {
-      headers: { 'Cache-Control': 'no-store' },
+      headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=300' },
     });
   } catch (error) {
     console.error('Gallery lookup failed', error);

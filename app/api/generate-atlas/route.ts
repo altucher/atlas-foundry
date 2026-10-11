@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
+import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
+import { finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
 import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
@@ -18,7 +22,6 @@ const defaultResearchModel = 'gpt-5.6-luna';
 const defaultDeepResearchModel = 'gpt-5.6-terra';
 const defaultSupplierResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
-const requestWindows = new Map<string, number[]>();
 const windowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 3;
 const supplierRoles = ['manufacturer', 'assembler', 'designer', 'ip-licensor', 'software-provider', 'material-supplier', 'integrator', 'other'] as const;
@@ -86,6 +89,8 @@ const falconNineDeepLayers = [
     focus: 'Falcon 9 vehicle-to-pad and vehicle-to-mission interfaces: transporter-erector strongback connections, hold-down and release, propellant and helium loading interfaces, electrical and data umbilicals, purge and environmental control, launch mount flame interface, payload access, range and tracking links, recovery assets, and generation- or site-specific variations without treating ground equipment as flying hardware',
   },
 ] as const;
+// When the image service answers 'no credits', new builds are refused for ten minutes instead of spending text-research money on atlases that cannot get their images.
+let imagesDownUntil = 0;
 const aiDispatcher = new Agent({
   headersTimeout: 780_000,
   bodyTimeout: 780_000,
@@ -103,6 +108,9 @@ type AiConnection = {
   deepResearchModel: string;
   supplierResearchModel: string;
   imageModel: string;
+  /** Phase B: text research through the TAO-1 API instead of the OpenAI Responses API (images and image-input calls stay on OpenAI) */
+  textProvider?: 'openai' | 'tao1';
+  tao1?: Tao1Connection;
 };
 
 function gatewayModel(model: string) {
@@ -113,7 +121,15 @@ function directOpenAiModel(model: string) {
   return model.startsWith('openai/') ? model.slice('openai/'.length) : model;
 }
 
-function getAiConnection(request: Request): AiConnection | null {
+function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1'): AiConnection | null {
+  const base = getAiConnectionBase(request);
+  if (!base) return null;
+  const tao1 = tao1ConnectionFromEnv();
+  const wanted = textOverride ?? (process.env.ATLAS_TEXT_PROVIDER?.trim().toLowerCase() === 'tao1' ? 'tao1' : 'openai');
+  return tao1 && wanted === 'tao1' ? { ...base, textProvider: 'tao1', tao1 } : { ...base, textProvider: 'openai' };
+}
+
+function getAiConnectionBase(request: Request): AiConnection | null {
   const configuredDraftModel = process.env.OPENAI_DRAFT_MODEL ?? defaultDraftModel;
   const configuredResearchModel = process.env.OPENAI_RESEARCH_MODEL ?? defaultResearchModel;
   const configuredDeepResearchModel = process.env.OPENAI_DEEP_RESEARCH_MODEL ?? defaultDeepResearchModel;
@@ -532,6 +548,8 @@ function responseFailure(payload: Record<string, unknown>) {
 
 function researchConfigurationFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? '');
+  if (/^TAO-1 text call failed \((?:401|403)\)/.test(message)) return 'tao1_auth' as const;
+  if (/^TAO-1 text call failed \(402\)/.test(message)) return 'tao1_credits' as const;
   if (/no credits remaining|insufficient[_ ]quota|billing quota|add credits/i.test(message)) return 'credits' as const;
   if (/invalid api key|incorrect api key|authentication|unauthorized/i.test(message)) return 'authentication' as const;
   if (/model.+(?:not found|does not exist|not available|not supported)/i.test(message)) return 'model' as const;
@@ -544,6 +562,12 @@ async function generateResearchInBackground(
   report: ProgressReporter,
   progress: { stage: ProgressStage; message: string } = { stage: 'research', message: 'Researching the architecture and component evidence' },
 ) {
+  if (connection.textProvider === 'tao1' && connection.tao1 && typeof body.input === 'string') {
+    report({ stage: progress.stage, message: `${progress.message} (through the TAO-1 API)…` });
+    const payload = await tao1StructuredCall(connection.tao1, body);
+    recordResponse(progress.stage, connection.tao1.model, payload, { provider: 'tao1' });
+    return payload;
+  }
   const headers = { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' };
   const created = await undiciFetch(`${connection.baseUrl}/responses`, {
     dispatcher: aiDispatcher,
@@ -582,6 +606,7 @@ async function generateResearchInBackground(
     payload = (await polled.json()) as Record<string, unknown>;
   }
 
+  recordResponse(progress.stage, String(body.model ?? 'unknown'), payload);
   if (payload.status !== 'completed') throw new Error(responseFailure(payload));
   return payload;
 }
@@ -698,6 +723,17 @@ async function enrichSuppliers(
   const settled = await Promise.allSettled(batches.map((parts, index) => researchSupplierBatch(connection, atlas, parts, index, batches.length, report)));
   const successful = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
   const failedCount = settled.length - successful.length;
+  // A pass can return fewer audit records than the components it was given (seen on the TAO-1 text path: 18 of 30 audited). Re-check the unaudited ones once.
+  if (successful.length) {
+    const audited = new Set(successful.flatMap((result) => result.coverage.map((coverage) => coverage.partId)));
+    const missing = atlas.parts.filter((part) => !audited.has(part.id));
+    if (missing.length) {
+      report({ stage: 'vendor', message: `Re-checking ${missing.length} components the first supplier pass left unaudited…` });
+      const retryBatches = Array.from({ length: Math.ceil(missing.length / batchSize) }, (_, index) => missing.slice(index * batchSize, (index + 1) * batchSize));
+      const retried = await Promise.allSettled(retryBatches.map((parts, index) => researchSupplierBatch(connection, atlas, parts, index, retryBatches.length, report)));
+      for (const result of retried) if (result.status === 'fulfilled') successful.push(result.value);
+    }
+  }
   for (const result of settled) {
     if (result.status === 'rejected') console.warn('Supplier evidence batch failed', result.reason);
   }
@@ -855,7 +891,7 @@ async function deepenDataCenterArchive(
     message: `Canonical data-center archive now contains ${merged.parts.length} components across ${merged.archive?.layers.length ?? 1} explorable levels.`,
   });
   report({ stage: 'save', message: 'Saving every completed layer under the canonical data-center archive…' });
-  const saved = await saveAtlasToGallery(merged, 'data center');
+  const saved = await saveAtlasToGallery({ ...merged, buildCost: mergeBuildCost(existing.buildCost, summarizeLedger()) }, 'data center');
   report({ stage: 'done', message: 'Multilevel data-center archive complete; all common prompt aliases now reopen this record.' });
   return saved;
 }
@@ -932,7 +968,7 @@ async function deepenFalconNineArchive(
   });
   report({ stage: 'inventory', message: `Falcon 9 archive now contains ${merged.parts.length} components across ${merged.archive?.layers.length ?? 1} explorable levels.` });
   report({ stage: 'save', message: 'Saving every completed Falcon 9 layer under one canonical archive…' });
-  const saved = await saveAtlasToGallery(merged, 'Falcon 9');
+  const saved = await saveAtlasToGallery({ ...merged, buildCost: mergeBuildCost(existing.buildCost, summarizeLedger()) }, 'Falcon 9');
   report({ stage: 'done', message: 'Multilevel Falcon 9 archive complete; common prompt aliases now reopen this record.' });
   return saved;
 }
@@ -967,6 +1003,10 @@ async function generateImage(
       }),
     });
     if (!response.ok) {
+      if (response.status === 429 || response.status === 402) {
+        const detail = await response.text().catch(() => '');
+        if (/insufficient_quota|no credits|credit_balance/i.test(detail)) imagesDownUntil = Date.now() + 10 * 60 * 1000;
+      }
       if (attempt === 0 && response.status >= 500) {
         retryDirection = '\n\nThe image service interrupted the prior render. Recreate the requested composition from scratch.';
         continue;
@@ -974,6 +1014,7 @@ async function generateImage(
       throw new Error(`Image generation failed (${response.status}).`);
     }
     const payload = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    recordImage(`image-${mode}`, connection.imageModel, { usage: (payload as Record<string, unknown>).usage }, { size: imageOrientation === 'portrait' ? '1024x1536' : '1536x1024', quality: 'high' });
     const generated = payload.data?.[0];
     const image = generated?.b64_json ? `data:image/webp;base64,${generated.b64_json}` : generated?.url;
     if (!image) throw new Error('Image generation returned no image.');
@@ -1022,6 +1063,7 @@ async function assessGeneratedImage(
   });
   if (!response.ok) throw new Error(`Image composition QA failed (${response.status}).`);
   const payload = (await response.json()) as Record<string, unknown>;
+  recordResponse('image-qa', connection.draftModel, payload);
   return JSON.parse(extractOutputText(payload)) as { pass: boolean; issues: string[] };
 }
 
@@ -1071,6 +1113,7 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
   });
   if (!response.ok) throw new Error(`Hotspot mapping failed (${response.status}).`);
   const payload = (await response.json()) as Record<string, unknown>;
+  recordResponse('hotspots', connection.researchModel, payload);
   const located = JSON.parse(extractOutputText(payload)) as { hotspots?: Array<AtlasHotspot & { id: string }> };
   const knownIds = new Set(parts.map((part) => part.id));
   for (const hotspot of located.hotspots ?? []) {
@@ -1088,6 +1131,7 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
 }
 
 export async function POST(request: Request) {
+  const isAdmin = adminAuthorized(request);
   let prompt = '';
   let phase: 'draft' | 'enrich' = 'draft';
   let recovery = false;
@@ -1116,6 +1160,8 @@ export async function POST(request: Request) {
             Accept: request.headers.get('accept') ?? 'application/json',
             ...(request.headers.get('x-atlas-force-refresh') === '1' ? { 'X-Atlas-Force-Refresh': '1' } : {}),
             ...(request.headers.get('x-atlas-deep-build') === '1' ? { 'X-Atlas-Deep-Build': '1' } : {}),
+            ...(request.headers.get('x-atlas-admin') ? { 'X-Atlas-Admin': request.headers.get('x-atlas-admin') as string } : {}),
+            'X-Forwarded-For': clientId(request),
           },
           body: JSON.stringify({ prompt, phase, recovery }),
           cache: 'no-store',
@@ -1143,8 +1189,9 @@ export async function POST(request: Request) {
   if (loadedCachedAtlas && !cachedAtlas) {
     report({ stage: 'cache', message: `Rejected a mismatched saved record (${loadedCachedAtlas.subject}); rebuilding ${prompt} safely…` });
   }
-  const forceRefresh = request.headers.get('x-atlas-force-refresh') === '1';
-  const deepBuildKey = request.headers.get('x-atlas-deep-build') === '1' && ['data-center', 'falcon-9'].includes(promptCacheKey)
+  // Force-refresh and deep-build rewrite saved atlases and spend heavily: only a caller holding ATLAS_ADMIN_SECRET may use them (the headers are ignored otherwise).
+  const forceRefresh = isAdmin && request.headers.get('x-atlas-force-refresh') === '1';
+  const deepBuildKey = isAdmin && request.headers.get('x-atlas-deep-build') === '1' && ['data-center', 'falcon-9'].includes(promptCacheKey)
     ? promptCacheKey
     : null;
   if (phase === 'draft' && !forceRefresh && !deepBuildKey && cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
@@ -1159,7 +1206,8 @@ export async function POST(request: Request) {
     report({ stage: 'cache', message: 'Refreshing the saved atlas, research record, and matched image pair…' });
   }
 
-  const connection = getAiConnection(request);
+  const textOverride = isAdmin && request.headers.get('x-atlas-text-provider') === 'tao1' ? 'tao1' : isAdmin && request.headers.get('x-atlas-text-provider') === 'openai' ? 'openai' : undefined;
+  const connection = getAiConnection(request, textOverride);
   if (!connection) {
     return NextResponse.json(
       { code: 'NOT_CONFIGURED', error: 'Live atlas generation is not configured on this deployment.' },
@@ -1167,7 +1215,22 @@ export async function POST(request: Request) {
     );
   }
 
+  if (phase === 'draft' && !isAdmin && Date.now() < imagesDownUntil) {
+    return NextResponse.json({ code: 'CREDITS_EXHAUSTED', error: 'Live generation is paused because the image service has no credits remaining. Saved gallery atlases remain available.' }, { status: 402 });
+  }
   if (phase === 'enrich') {
+    // A finished current atlas needs no paid enrichment: serve it. Otherwise the enrich phase is limited per caller and per atlas.
+    if (!isAdmin && cachedAtlas?.buildStage === 'complete' && cachedAtlas.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
+      return NextResponse.json({ atlas: cachedAtlas, cached: true, enriched: true });
+    }
+    if (!isAdmin) {
+      const perAtlas = await hitLimit({ bucket: 'enrich-key', id: promptCacheKey, limit: 1, windowMs: 30 * 60 * 1000 });
+      const perCaller = await hitLimit({ bucket: 'enrich-ip', id: clientId(request), limit: 8, windowMs: 60 * 60 * 1000 });
+      if (!perAtlas.ok || !perCaller.ok) {
+        const wait = Math.max(perAtlas.retryAfterSec, perCaller.retryAfterSec);
+        return NextResponse.json({ error: 'Supplier research for this atlas is already running or was requested recently. Please try again later.' }, { status: 429, headers: { 'Retry-After': String(wait) } });
+      }
+    }
     const draft = await loadAtlasDraft(promptCacheKey);
     if (!draft || !subjectMatchesRequest(researchPrompt, draft.subject)) {
       return NextResponse.json({ error: 'The first draft is no longer available for supplier enrichment.' }, { status: 409 });
@@ -1197,6 +1260,7 @@ export async function POST(request: Request) {
         hotspots: mappedHotspots,
         buildStage: 'complete',
         generatedAt: new Date().toISOString(),
+        buildCost: mergeBuildCost(draft.buildCost, summarizeLedger()),
       }, prompt);
       report({ stage: 'done', message: 'Supplier and IP research complete. The finished edition is now saved for instant reuse.' });
       return NextResponse.json({
@@ -1211,14 +1275,17 @@ export async function POST(request: Request) {
     }
   }
 
-  const clientId = request.headers.get('cf-connecting-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
-  const now = Date.now();
-  const recent = (requestWindows.get(clientId) ?? []).filter((timestamp) => now - timestamp < windowMs);
-  if (recent.length >= maxRequestsPerWindow) {
-    return NextResponse.json({ error: 'Atlas generation is limited to three requests every ten minutes. Please try again shortly.' }, { status: 429 });
+  if (!isAdmin) {
+    const caller = await hitLimit({ bucket: 'generate-ip', id: clientId(request), limit: maxRequestsPerWindow, windowMs });
+    if (!caller.ok) {
+      return NextResponse.json({ error: 'Atlas generation is limited to three requests every ten minutes. Please try again shortly.' }, { status: 429, headers: { 'Retry-After': String(caller.retryAfterSec) } });
+    }
+    const dailyCap = Number(process.env.ATLAS_DAILY_BUILD_LIMIT ?? 60);
+    const daily = await hitLimit({ bucket: 'generate-day', id: dayBucket(), limit: Number.isFinite(dailyCap) && dailyCap > 0 ? dailyCap : 60, windowMs: 24 * 60 * 60 * 1000 });
+    if (!daily.ok) {
+      return NextResponse.json({ error: 'New atlas builds are paused for today because the daily build budget was reached. Saved atlases are still available.' }, { status: 429, headers: { 'Retry-After': String(daily.retryAfterSec) } });
+    }
   }
-  recent.push(now);
-  requestWindows.set(clientId, recent);
 
   if (deepBuildKey) {
     const missingRequiredBase = !cachedAtlas || (deepBuildKey === 'data-center' && cachedAtlas.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION);
@@ -1336,9 +1403,17 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     };
     let cacheWarning: string | undefined;
     try {
-      report({ stage: 'save', message: 'Saving the first draft so deeper research can continue independently…' });
-      atlas = await saveAtlasDraft(atlas, prompt);
-      report({ stage: 'done', message: 'First draft ready. Supplier and IP research is continuing in the background.' });
+      // A half-finished build is never saved as if it were whole: the saved gallery needs the matched image pair. Without both images the draft is shown to this
+      // visitor only (an admin test may keep a text-only draft with X-Atlas-Allow-Text-Only: 1). The build's usage is still recorded either way.
+      if ((!image || !explodedImage) && !(isAdmin && request.headers.get('x-atlas-allow-text-only') === '1')) {
+        cacheWarning = 'The first draft is ready, but it was not saved to the shared gallery because the matched image pair could not be generated.';
+        noteLedger('draft_not_saved_no_images');
+        report({ stage: 'done', message: 'First draft ready; it was not saved because the images were unavailable.' });
+      } else {
+        report({ stage: 'save', message: 'Saving the first draft so deeper research can continue independently…' });
+        atlas = await saveAtlasDraft({ ...atlas, buildCost: mergeBuildCost(undefined, summarizeLedger()) }, prompt);
+        report({ stage: 'done', message: 'First draft ready. Supplier and IP research is continuing in the background.' });
+      }
     } catch (error) {
       console.warn('Atlas generated but could not be added to the gallery', error);
       cacheWarning = 'The first draft is ready, but background enrichment cannot start because temporary storage was unavailable.';
@@ -1365,6 +1440,9 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
         error: 'Live generation is paused because the OpenAI API account connected to this site has no credits remaining. Add API credits in OpenAI Platform billing, then retry. Saved gallery atlases remain available.',
       }, { status: 402 });
     }
+    if (configurationFailure === 'tao1_auth' || configurationFailure === 'tao1_credits') {
+      return NextResponse.json({ code: configurationFailure === 'tao1_auth' ? 'TEXT_PROVIDER_AUTH_FAILED' : 'TEXT_PROVIDER_CREDITS', error: 'Live generation is paused because the text research service did not accept this site. Saved gallery atlases remain available.' }, { status: 503 });
+    }
     if (configurationFailure === 'authentication') {
       return NextResponse.json({ code: 'AUTHENTICATION_FAILED', error: 'Live generation is paused because the server API key was rejected. Replace OPENAI_API_KEY in Vercel, then redeploy.' }, { status: 503 });
     }
@@ -1378,13 +1456,29 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
   }
   };
 
+  const ledgerPhase = phase === 'enrich' ? 'enrich' : request.headers.get('x-atlas-deep-build') === '1' ? 'deep' : 'draft';
+  // who triggered the build: an internal test (admin header), otherwise an anonymous visitor (a salted hash of the caller, never the raw address)
+  const who: BuildWho = isAdmin
+    ? { kind: 'internal-test', id: (request.headers.get('x-atlas-test-label') ?? 'admin').slice(0, 60) }
+    : { kind: 'anonymous', id: createHash('sha256').update(`${process.env.ATLAS_ADMIN_SECRET ?? 'atlas'}:${clientId(request)}`).digest('hex').slice(0, 16) };
+  const runLedgered = (report: ProgressReporter) => runWithLedger(ledgerPhase, cacheKeyForPrompt(prompt), who, async () => {
+    try {
+      const response = await run(report);
+      await finishLedger(response.ok ? (ledgerPhase === 'draft' ? 'draft_saved' : 'complete') : `failed_http_${response.status}`);
+      return response;
+    } catch (error) {
+      await finishLedger('failed_exception');
+      throw error;
+    }
+  });
+
   if (request.headers.get('accept')?.includes('application/x-ndjson')) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const send = (value: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
         try {
-          const response = await run((entry) => send({ type: 'progress', ...entry }));
+          const response = await runLedgered((entry) => send({ type: 'progress', ...entry }));
           const payload = await response.json();
           send({ type: 'result', status: response.status, payload });
         } catch (error) {
@@ -1404,5 +1498,5 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     });
   }
 
-  return run(() => undefined);
+  return runLedgered(() => undefined);
 }
