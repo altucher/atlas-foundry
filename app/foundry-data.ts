@@ -90,6 +90,8 @@ export type FoundryAtlas = {
   mode: 'curated' | 'generated' | 'authoritative-3d';
   generatedAt?: string;
   buildStage?: 'draft' | 'complete';
+  /** per-phase model usage of the build that produced this atlas (see app/cost-ledger.ts) */
+  buildCost?: import('./cost-ledger').BuildCost;
   archive?: AtlasArchive;
 };
 

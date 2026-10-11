@@ -959,11 +959,12 @@ export default function FoundryHome() {
                       } as CSSProperties}
                       disabled={explode < 0.12}
                       onClick={() => { setSelectedId(part.id); trackAnalytics('component_select', { atlas: atlas.subject, component: part.name, componentId: part.id, surface: 'exploded-image' }); }}
-                      aria-label={`Select ${part.name}${part.suppliers?.length ? `, with ${part.suppliers.length} supplier ${part.suppliers.length === 1 ? 'record' : 'records'}` : ''}`}
+                      aria-label={`Select ${part.name}${regions.length > 1 ? ` (region ${regionIndex + 1} of ${regions.length})` : ''}${part.suppliers?.length ? `, with ${part.suppliers.length} supplier ${part.suppliers.length === 1 ? 'record' : 'records'}` : ''}`}
                       aria-pressed={active}
                     >
                       <i>{String(partIndex + 1).padStart(2, '0')}</i>
-                      <span><strong>{part.name}</strong>{part.suppliers?.length ? <small>{supplierSummary(part)}</small> : null}</span>
+                      {/* A part drawn in several places (four brake assemblies) shows its name and supplier once; the other regions are numbered markers. */}
+                      {regionIndex === 0 && <span><strong>{part.name}</strong>{part.suppliers?.length ? <small>{supplierSummary(part)}</small> : null}</span>}
                     </button>
                   ));
                 })}

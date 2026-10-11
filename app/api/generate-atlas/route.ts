@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
+import { logLedger, mergeBuildCost, recordImage, recordResponse, runWithLedger, summarizeLedger } from '@/app/cost-ledger';
 
 import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
@@ -18,7 +20,6 @@ const defaultResearchModel = 'gpt-5.6-luna';
 const defaultDeepResearchModel = 'gpt-5.6-terra';
 const defaultSupplierResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
-const requestWindows = new Map<string, number[]>();
 const windowMs = 10 * 60 * 1000;
 const maxRequestsPerWindow = 3;
 const supplierRoles = ['manufacturer', 'assembler', 'designer', 'ip-licensor', 'software-provider', 'material-supplier', 'integrator', 'other'] as const;
@@ -582,6 +583,7 @@ async function generateResearchInBackground(
     payload = (await polled.json()) as Record<string, unknown>;
   }
 
+  recordResponse(progress.stage, String(body.model ?? 'unknown'), payload);
   if (payload.status !== 'completed') throw new Error(responseFailure(payload));
   return payload;
 }
@@ -855,7 +857,7 @@ async function deepenDataCenterArchive(
     message: `Canonical data-center archive now contains ${merged.parts.length} components across ${merged.archive?.layers.length ?? 1} explorable levels.`,
   });
   report({ stage: 'save', message: 'Saving every completed layer under the canonical data-center archive…' });
-  const saved = await saveAtlasToGallery(merged, 'data center');
+  const saved = await saveAtlasToGallery({ ...merged, buildCost: mergeBuildCost(existing.buildCost, summarizeLedger()) }, 'data center');
   report({ stage: 'done', message: 'Multilevel data-center archive complete; all common prompt aliases now reopen this record.' });
   return saved;
 }
@@ -932,7 +934,7 @@ async function deepenFalconNineArchive(
   });
   report({ stage: 'inventory', message: `Falcon 9 archive now contains ${merged.parts.length} components across ${merged.archive?.layers.length ?? 1} explorable levels.` });
   report({ stage: 'save', message: 'Saving every completed Falcon 9 layer under one canonical archive…' });
-  const saved = await saveAtlasToGallery(merged, 'Falcon 9');
+  const saved = await saveAtlasToGallery({ ...merged, buildCost: mergeBuildCost(existing.buildCost, summarizeLedger()) }, 'Falcon 9');
   report({ stage: 'done', message: 'Multilevel Falcon 9 archive complete; common prompt aliases now reopen this record.' });
   return saved;
 }
@@ -974,6 +976,7 @@ async function generateImage(
       throw new Error(`Image generation failed (${response.status}).`);
     }
     const payload = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
+    recordImage(`image-${mode}`, connection.imageModel, { usage: (payload as Record<string, unknown>).usage });
     const generated = payload.data?.[0];
     const image = generated?.b64_json ? `data:image/webp;base64,${generated.b64_json}` : generated?.url;
     if (!image) throw new Error('Image generation returned no image.');
@@ -1022,6 +1025,7 @@ async function assessGeneratedImage(
   });
   if (!response.ok) throw new Error(`Image composition QA failed (${response.status}).`);
   const payload = (await response.json()) as Record<string, unknown>;
+  recordResponse('image-qa', connection.draftModel, payload);
   return JSON.parse(extractOutputText(payload)) as { pass: boolean; issues: string[] };
 }
 
@@ -1071,6 +1075,7 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
   });
   if (!response.ok) throw new Error(`Hotspot mapping failed (${response.status}).`);
   const payload = (await response.json()) as Record<string, unknown>;
+  recordResponse('hotspots', connection.researchModel, payload);
   const located = JSON.parse(extractOutputText(payload)) as { hotspots?: Array<AtlasHotspot & { id: string }> };
   const knownIds = new Set(parts.map((part) => part.id));
   for (const hotspot of located.hotspots ?? []) {
@@ -1116,6 +1121,8 @@ export async function POST(request: Request) {
             Accept: request.headers.get('accept') ?? 'application/json',
             ...(request.headers.get('x-atlas-force-refresh') === '1' ? { 'X-Atlas-Force-Refresh': '1' } : {}),
             ...(request.headers.get('x-atlas-deep-build') === '1' ? { 'X-Atlas-Deep-Build': '1' } : {}),
+            ...(request.headers.get('x-atlas-admin') ? { 'X-Atlas-Admin': request.headers.get('x-atlas-admin') as string } : {}),
+            'X-Forwarded-For': clientId(request),
           },
           body: JSON.stringify({ prompt, phase, recovery }),
           cache: 'no-store',
@@ -1143,8 +1150,10 @@ export async function POST(request: Request) {
   if (loadedCachedAtlas && !cachedAtlas) {
     report({ stage: 'cache', message: `Rejected a mismatched saved record (${loadedCachedAtlas.subject}); rebuilding ${prompt} safely…` });
   }
-  const forceRefresh = request.headers.get('x-atlas-force-refresh') === '1';
-  const deepBuildKey = request.headers.get('x-atlas-deep-build') === '1' && ['data-center', 'falcon-9'].includes(promptCacheKey)
+  // Force-refresh and deep-build rewrite saved atlases and spend heavily: only a caller holding ATLAS_ADMIN_SECRET may use them (the headers are ignored otherwise).
+  const isAdmin = adminAuthorized(request);
+  const forceRefresh = isAdmin && request.headers.get('x-atlas-force-refresh') === '1';
+  const deepBuildKey = isAdmin && request.headers.get('x-atlas-deep-build') === '1' && ['data-center', 'falcon-9'].includes(promptCacheKey)
     ? promptCacheKey
     : null;
   if (phase === 'draft' && !forceRefresh && !deepBuildKey && cachedAtlas?.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
@@ -1168,6 +1177,18 @@ export async function POST(request: Request) {
   }
 
   if (phase === 'enrich') {
+    // A finished current atlas needs no paid enrichment: serve it. Otherwise the enrich phase is limited per caller and per atlas.
+    if (!isAdmin && cachedAtlas?.buildStage === 'complete' && cachedAtlas.intelligenceVersion === CURRENT_INTELLIGENCE_VERSION) {
+      return NextResponse.json({ atlas: cachedAtlas, cached: true, enriched: true });
+    }
+    if (!isAdmin) {
+      const perAtlas = await hitLimit({ bucket: 'enrich-key', id: promptCacheKey, limit: 1, windowMs: 30 * 60 * 1000 });
+      const perCaller = await hitLimit({ bucket: 'enrich-ip', id: clientId(request), limit: 8, windowMs: 60 * 60 * 1000 });
+      if (!perAtlas.ok || !perCaller.ok) {
+        const wait = Math.max(perAtlas.retryAfterSec, perCaller.retryAfterSec);
+        return NextResponse.json({ error: 'Supplier research for this atlas is already running or was requested recently. Please try again later.' }, { status: 429, headers: { 'Retry-After': String(wait) } });
+      }
+    }
     const draft = await loadAtlasDraft(promptCacheKey);
     if (!draft || !subjectMatchesRequest(researchPrompt, draft.subject)) {
       return NextResponse.json({ error: 'The first draft is no longer available for supplier enrichment.' }, { status: 409 });
@@ -1197,6 +1218,7 @@ export async function POST(request: Request) {
         hotspots: mappedHotspots,
         buildStage: 'complete',
         generatedAt: new Date().toISOString(),
+        buildCost: mergeBuildCost(draft.buildCost, summarizeLedger()),
       }, prompt);
       report({ stage: 'done', message: 'Supplier and IP research complete. The finished edition is now saved for instant reuse.' });
       return NextResponse.json({
@@ -1211,14 +1233,17 @@ export async function POST(request: Request) {
     }
   }
 
-  const clientId = request.headers.get('cf-connecting-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
-  const now = Date.now();
-  const recent = (requestWindows.get(clientId) ?? []).filter((timestamp) => now - timestamp < windowMs);
-  if (recent.length >= maxRequestsPerWindow) {
-    return NextResponse.json({ error: 'Atlas generation is limited to three requests every ten minutes. Please try again shortly.' }, { status: 429 });
+  if (!isAdmin) {
+    const caller = await hitLimit({ bucket: 'generate-ip', id: clientId(request), limit: maxRequestsPerWindow, windowMs });
+    if (!caller.ok) {
+      return NextResponse.json({ error: 'Atlas generation is limited to three requests every ten minutes. Please try again shortly.' }, { status: 429, headers: { 'Retry-After': String(caller.retryAfterSec) } });
+    }
+    const dailyCap = Number(process.env.ATLAS_DAILY_BUILD_LIMIT ?? 60);
+    const daily = await hitLimit({ bucket: 'generate-day', id: dayBucket(), limit: Number.isFinite(dailyCap) && dailyCap > 0 ? dailyCap : 60, windowMs: 24 * 60 * 60 * 1000 });
+    if (!daily.ok) {
+      return NextResponse.json({ error: 'New atlas builds are paused for today because the daily build budget was reached. Saved atlases are still available.' }, { status: 429, headers: { 'Retry-After': String(daily.retryAfterSec) } });
+    }
   }
-  recent.push(now);
-  requestWindows.set(clientId, recent);
 
   if (deepBuildKey) {
     const missingRequiredBase = !cachedAtlas || (deepBuildKey === 'data-center' && cachedAtlas.intelligenceVersion !== CURRENT_INTELLIGENCE_VERSION);
@@ -1337,7 +1362,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     let cacheWarning: string | undefined;
     try {
       report({ stage: 'save', message: 'Saving the first draft so deeper research can continue independently…' });
-      atlas = await saveAtlasDraft(atlas, prompt);
+      atlas = await saveAtlasDraft({ ...atlas, buildCost: mergeBuildCost(undefined, summarizeLedger()) }, prompt);
       report({ stage: 'done', message: 'First draft ready. Supplier and IP research is continuing in the background.' });
     } catch (error) {
       console.warn('Atlas generated but could not be added to the gallery', error);
@@ -1378,13 +1403,25 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
   }
   };
 
+  const ledgerPhase = phase === 'enrich' ? 'enrich' : request.headers.get('x-atlas-deep-build') === '1' ? 'deep' : 'draft';
+  const runLedgered = (report: ProgressReporter) => runWithLedger(ledgerPhase, cacheKeyForPrompt(prompt), async () => {
+    try {
+      const response = await run(report);
+      logLedger(response.ok ? 'ok' : `http_${response.status}`);
+      return response;
+    } catch (error) {
+      logLedger('error');
+      throw error;
+    }
+  });
+
   if (request.headers.get('accept')?.includes('application/x-ndjson')) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const send = (value: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
         try {
-          const response = await run((entry) => send({ type: 'progress', ...entry }));
+          const response = await runLedgered((entry) => send({ type: 'progress', ...entry }));
           const payload = await response.json();
           send({ type: 'result', status: response.status, payload });
         } catch (error) {
@@ -1404,5 +1441,5 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     });
   }
 
-  return run(() => undefined);
+  return runLedgered(() => undefined);
 }
