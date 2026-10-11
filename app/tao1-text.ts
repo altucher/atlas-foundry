@@ -41,7 +41,7 @@ export async function tao1StructuredCall(conn: Tao1Connection, body: Record<stri
   const maxOut = typeof body.max_output_tokens === 'number' ? body.max_output_tokens : 32_000;
   const system = `${String(body.instructions ?? '')}
 
-You have live web search: search before you answer and cite only pages you actually found. Reply with ONE JSON object and nothing else: no prose, no code fence. It must satisfy this JSON schema exactly (every required key present, no extra keys):
+You have live web search: search before you answer and cite only pages you actually found. When the schema has a sources list, return as many distinct authoritative sources as the subject supports (manufacturer pages and manuals, standards, museums, universities, filings), at least 15 when they exist. When the schema asks for coverage records, return exactly one for every component id supplied. Reply with ONE JSON object and nothing else: no prose, no code fence. It must satisfy this JSON schema exactly (every required key present, no extra keys):
 ${JSON.stringify(schema)}`;
   const messages: Array<{ role: string; content: string }> = [{ role: 'system', content: system }, { role: 'user', content: String(body.input ?? '') }];
   let usage: Tao1Usage = { prompt_tokens: 0, completion_tokens: 0 };

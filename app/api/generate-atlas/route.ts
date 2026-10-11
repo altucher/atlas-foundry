@@ -721,6 +721,17 @@ async function enrichSuppliers(
   const settled = await Promise.allSettled(batches.map((parts, index) => researchSupplierBatch(connection, atlas, parts, index, batches.length, report)));
   const successful = settled.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
   const failedCount = settled.length - successful.length;
+  // A pass can return fewer audit records than the components it was given (seen on the TAO-1 text path: 18 of 30 audited). Re-check the unaudited ones once.
+  if (successful.length) {
+    const audited = new Set(successful.flatMap((result) => result.coverage.map((coverage) => coverage.partId)));
+    const missing = atlas.parts.filter((part) => !audited.has(part.id));
+    if (missing.length) {
+      report({ stage: 'vendor', message: `Re-checking ${missing.length} components the first supplier pass left unaudited…` });
+      const retryBatches = Array.from({ length: Math.ceil(missing.length / batchSize) }, (_, index) => missing.slice(index * batchSize, (index + 1) * batchSize));
+      const retried = await Promise.allSettled(retryBatches.map((parts, index) => researchSupplierBatch(connection, atlas, parts, index, retryBatches.length, report)));
+      for (const result of retried) if (result.status === 'fulfilled') successful.push(result.value);
+    }
+  }
   for (const result of settled) {
     if (result.status === 'rejected') console.warn('Supplier evidence batch failed', result.reason);
   }
