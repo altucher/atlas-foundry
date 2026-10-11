@@ -786,7 +786,7 @@ export default function FoundryHome({ embed = false }: { embed?: boolean } = {})
       </section>
       </>}
 
-      {embed && notice && <button type="button" className="foundry-notice embed-notice" onClick={() => setNotice('')}><CircleAlert /> <span>{notice}</span><X /></button>}
+      {embed && buildError && <div className="foundry-notice embed-notice" role="alert"><CircleAlert /> <span>{buildError}</span></div>}
 
       <section ref={workbenchRef} className="foundry-workbench" aria-label={`${atlas.subject} component atlas`}>
         <aside className="foundry-index">
