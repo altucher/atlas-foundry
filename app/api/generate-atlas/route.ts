@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
+import { tao1GenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
@@ -110,6 +111,9 @@ type AiConnection = {
   imageModel: string;
   /** Phase B: text research through the TAO-1 API instead of the OpenAI Responses API (images and image-input calls stay on OpenAI) */
   textProvider?: 'openai' | 'tao1';
+  /** images through TAO-1's media path (Chutes) and image QA / hotspot vision through a TAO-1 vision cell; both default to OpenAI */
+  imageProvider?: 'openai' | 'chutes';
+  visionProvider?: 'openai' | 'tao1';
   tao1?: Tao1Connection;
 };
 
@@ -121,12 +125,19 @@ function directOpenAiModel(model: string) {
   return model.startsWith('openai/') ? model.slice('openai/'.length) : model;
 }
 
-function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1'): AiConnection | null {
+function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', imageOverride?: 'openai' | 'chutes'): AiConnection | null {
   const base = getAiConnectionBase(request);
   if (!base) return null;
   const tao1 = tao1ConnectionFromEnv();
   const wanted = textOverride ?? (process.env.ATLAS_TEXT_PROVIDER?.trim().toLowerCase() === 'tao1' ? 'tao1' : 'openai');
-  return tao1 && wanted === 'tao1' ? { ...base, textProvider: 'tao1', tao1 } : { ...base, textProvider: 'openai' };
+  const imageWanted = imageOverride ?? (process.env.ATLAS_IMAGE_PROVIDER?.trim().toLowerCase() === 'chutes' ? 'chutes' : 'openai');
+  const visionWanted = process.env.ATLAS_VISION_PROVIDER?.trim().toLowerCase() === 'tao1' ? 'tao1' : 'openai';
+  return {
+    ...base, tao1: tao1 ?? undefined,
+    textProvider: tao1 && wanted === 'tao1' ? 'tao1' : 'openai',
+    imageProvider: tao1 && imageWanted === 'chutes' ? 'chutes' : 'openai',
+    visionProvider: tao1 && visionWanted === 'tao1' ? 'tao1' : 'openai',
+  };
 }
 
 function getAiConnectionBase(request: Request): AiConnection | null {
@@ -992,6 +1003,21 @@ async function generateImage(
 
   let retryDirection = '';
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (connection.imageProvider === 'chutes' && connection.tao1) {
+      // Chutes (qwen-image-2512, z-image-turbo fallback) through TAO-1's media path; same prompts, same QA and retry as the OpenAI path below
+      const generated = await tao1GenerateImage(connection.tao1, `${sharedDirection} ${modeDirection}${retryDirection}`);
+      recordImage(`image-${mode}`, 'chutes/qwen-image-2512', { usage: generated.usage ? { input_tokens: generated.usage.prompt_tokens, output_tokens: generated.usage.completion_tokens } : undefined }, { size: generated.width && generated.height ? `${generated.width}x${generated.height}` : undefined, quality: 'chutes', provider: 'tao1', ms: generated.ms });
+      const image = generated.dataUrl;
+      try {
+        const assessment = await assessGeneratedImage(connection, image, subject, mode);
+        if (assessment.pass || attempt === 1) return image;
+        retryDirection = `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${assessment.issues.join(' ')} Recompose from scratch and satisfy every critical composition rule.`;
+      } catch (error) {
+        console.warn('Image composition QA unavailable', error);
+        return image;
+      }
+      continue;
+    }
     const response = await undiciFetch(`${connection.baseUrl}/images/generations`, {
       dispatcher: aiDispatcher,
       method: 'POST',
@@ -1049,6 +1075,15 @@ async function assessGeneratedImage(
   const passRule = mode === 'assembled'
     ? 'Pass only when exactly one intact subject is shown, it is fully visible, it occupies most of the useful frame, and there is no second copy, exploded arrangement, inset, or excessive empty border.'
     : 'Pass only when zero intact assembled products are shown, no major assembly such as a display is duplicated, the visible pieces all belong to one disassembled subject, components are distinct and non-overlapping, and they are distributed across the useful frame rather than piled at its center.';
+  const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a reference copy merely because other parts are exploded.`
+  if (connection.visionProvider === 'tao1' && connection.tao1) {
+    const r = await tao1VisionText(connection.tao1, `${qaInstructions}\nReply with ONE JSON object and nothing else: {"pass": boolean, "issues": [short strings, at most 8]}.`, 'Inspect this image.', image, 1500);
+    recordResponse('image-qa', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
+    const m = /\{[\s\S]*\}/.exec(r.text);
+    const parsed = m ? JSON.parse(m[0]) as { pass?: boolean; issues?: string[] } : null;
+    if (!parsed || typeof parsed.pass !== 'boolean') throw new Error('Image QA reply was not usable.');
+    return { pass: parsed.pass, issues: Array.isArray(parsed.issues) ? parsed.issues.map(String).slice(0, 8) : [] };
+  }
   const response = await undiciFetch(`${connection.baseUrl}/responses`, {
     dispatcher: aiDispatcher,
     method: 'POST',
@@ -1056,7 +1091,7 @@ async function assessGeneratedImage(
     body: JSON.stringify({
       model: connection.draftModel,
       reasoning: { effort: 'low' },
-      instructions: `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a reference copy merely because other parts are exploded.`,
+      instructions: qaInstructions,
       input: [{ role: 'user', content: [{ type: 'input_image', image_url: image, detail: 'high' }] }],
       text: { format: { type: 'json_schema', name: 'atlas_image_quality', strict: true, schema } },
     }),
@@ -1094,13 +1129,21 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
     },
   } as const;
   const partList = parts.map((part) => `${part.id}: ${part.name}`).join('\n');
+  const hotspotInstructions = 'Locate components in an exploded-view product image. Return a tight clickable bounding rectangle for each requested component cluster. Express its center as x/y percentages and its size as width/height percentages of the full image, measured from the top-left corner. Use every exact id once. If several adjacent pieces form one system, enclose that cluster. Do not include unrelated neighboring parts.'
+  if (connection.visionProvider === 'tao1' && connection.tao1) {
+    const r = await tao1VisionText(connection.tao1, `${hotspotInstructions}\nReply with ONE JSON object and nothing else: {"hotspots":[{"id": string, "x": number 0-100, "y": number 0-100, "width": number 1-100, "height": number 1-100}]} with one entry for every requested id.`, `Locate these components:\n${partList}`, explodedImage, 6000);
+    recordResponse('hotspots', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
+    const m = /\{[\s\S]*\}/.exec(r.text);
+    if (!m) throw new Error('Hotspot reply was not usable.');
+    return applyLocatedHotspots(fallback, JSON.parse(m[0]) as { hotspots?: Array<AtlasHotspot & { id: string }> }, parts);
+  }
   const response = await undiciFetch(`${connection.baseUrl}/responses`, {
     dispatcher: aiDispatcher,
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: connection.researchModel,
-      instructions: 'Locate components in an exploded-view product image. Return a tight clickable bounding rectangle for each requested component cluster. Express its center as x/y percentages and its size as width/height percentages of the full image, measured from the top-left corner. Use every exact id once. If several adjacent pieces form one system, enclose that cluster. Do not include unrelated neighboring parts.',
+      instructions: hotspotInstructions,
       input: [{
         role: 'user',
         content: [
@@ -1114,7 +1157,10 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
   if (!response.ok) throw new Error(`Hotspot mapping failed (${response.status}).`);
   const payload = (await response.json()) as Record<string, unknown>;
   recordResponse('hotspots', connection.researchModel, payload);
-  const located = JSON.parse(extractOutputText(payload)) as { hotspots?: Array<AtlasHotspot & { id: string }> };
+  return applyLocatedHotspots(fallback, JSON.parse(extractOutputText(payload)) as { hotspots?: Array<AtlasHotspot & { id: string }> }, parts);
+}
+
+function applyLocatedHotspots(fallback: ReturnType<typeof fallbackHotspots>, located: { hotspots?: Array<AtlasHotspot & { id: string }> }, parts: AtlasPart[]) {
   const knownIds = new Set(parts.map((part) => part.id));
   for (const hotspot of located.hotspots ?? []) {
     if (!knownIds.has(hotspot.id) || !Number.isFinite(hotspot.x) || !Number.isFinite(hotspot.y) || !Number.isFinite(hotspot.width) || !Number.isFinite(hotspot.height)) continue;
@@ -1207,7 +1253,8 @@ export async function POST(request: Request) {
   }
 
   const textOverride = isAdmin && request.headers.get('x-atlas-text-provider') === 'tao1' ? 'tao1' : isAdmin && request.headers.get('x-atlas-text-provider') === 'openai' ? 'openai' : undefined;
-  const connection = getAiConnection(request, textOverride);
+  const imageOverride = isAdmin && request.headers.get('x-atlas-image-provider') === 'chutes' ? 'chutes' : isAdmin && request.headers.get('x-atlas-image-provider') === 'openai' ? 'openai' : undefined;
+  const connection = getAiConnection(request, textOverride, imageOverride);
   if (!connection) {
     return NextResponse.json(
       { code: 'NOT_CONFIGURED', error: 'Live atlas generation is not configured on this deployment.' },

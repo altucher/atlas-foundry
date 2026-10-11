@@ -134,9 +134,9 @@ export function recordResponse(stage: string, model: string, payload: unknown, o
 }
 
 /** an /images/generations payload: one image, plus token usage when the model reports it */
-export function recordImage(stage: string, model: string, payload: unknown, opts: { size?: string; quality?: string; ms?: number } = {}) {
+export function recordImage(stage: string, model: string, payload: unknown, opts: { size?: string; quality?: string; ms?: number; provider?: CostCall['provider'] } = {}) {
   const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
-  push(stage, model, 'openai', p.usage, { images: 1, imageSize: opts.size, imageQuality: opts.quality, ms: opts.ms });
+  push(stage, model, opts.provider ?? 'openai', p.usage, { images: 1, imageSize: opts.size, imageQuality: opts.quality, ms: opts.ms });
 }
 
 function lineKey(call: CostCall) {
