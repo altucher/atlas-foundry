@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
+import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { logLedger, mergeBuildCost, recordImage, recordResponse, runWithLedger, summarizeLedger } from '@/app/cost-ledger';
 
 import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
@@ -104,6 +105,9 @@ type AiConnection = {
   deepResearchModel: string;
   supplierResearchModel: string;
   imageModel: string;
+  /** Phase B: text research through the TAO-1 API instead of the OpenAI Responses API (images and image-input calls stay on OpenAI) */
+  textProvider?: 'openai' | 'tao1';
+  tao1?: Tao1Connection;
 };
 
 function gatewayModel(model: string) {
@@ -114,7 +118,15 @@ function directOpenAiModel(model: string) {
   return model.startsWith('openai/') ? model.slice('openai/'.length) : model;
 }
 
-function getAiConnection(request: Request): AiConnection | null {
+function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1'): AiConnection | null {
+  const base = getAiConnectionBase(request);
+  if (!base) return null;
+  const tao1 = tao1ConnectionFromEnv();
+  const wanted = textOverride ?? (process.env.ATLAS_TEXT_PROVIDER?.trim().toLowerCase() === 'tao1' ? 'tao1' : 'openai');
+  return tao1 && wanted === 'tao1' ? { ...base, textProvider: 'tao1', tao1 } : { ...base, textProvider: 'openai' };
+}
+
+function getAiConnectionBase(request: Request): AiConnection | null {
   const configuredDraftModel = process.env.OPENAI_DRAFT_MODEL ?? defaultDraftModel;
   const configuredResearchModel = process.env.OPENAI_RESEARCH_MODEL ?? defaultResearchModel;
   const configuredDeepResearchModel = process.env.OPENAI_DEEP_RESEARCH_MODEL ?? defaultDeepResearchModel;
@@ -545,6 +557,12 @@ async function generateResearchInBackground(
   report: ProgressReporter,
   progress: { stage: ProgressStage; message: string } = { stage: 'research', message: 'Researching the architecture and component evidence' },
 ) {
+  if (connection.textProvider === 'tao1' && connection.tao1 && typeof body.input === 'string') {
+    report({ stage: progress.stage, message: `${progress.message} (through the TAO-1 API)…` });
+    const payload = await tao1StructuredCall(connection.tao1, body);
+    recordResponse(progress.stage, connection.tao1.model, payload);
+    return payload;
+  }
   const headers = { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' };
   const created = await undiciFetch(`${connection.baseUrl}/responses`, {
     dispatcher: aiDispatcher,
@@ -1168,7 +1186,8 @@ export async function POST(request: Request) {
     report({ stage: 'cache', message: 'Refreshing the saved atlas, research record, and matched image pair…' });
   }
 
-  const connection = getAiConnection(request);
+  const textOverride = isAdmin && request.headers.get('x-atlas-text-provider') === 'tao1' ? 'tao1' : isAdmin && request.headers.get('x-atlas-text-provider') === 'openai' ? 'openai' : undefined;
+  const connection = getAiConnection(request, textOverride);
   if (!connection) {
     return NextResponse.json(
       { code: 'NOT_CONFIGURED', error: 'Live atlas generation is not configured on this deployment.' },
