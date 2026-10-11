@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
-import { logLedger, mergeBuildCost, recordImage, recordResponse, runWithLedger, summarizeLedger } from '@/app/cost-ledger';
+import { finishLedger, mergeBuildCost, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
 import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
@@ -560,7 +561,7 @@ async function generateResearchInBackground(
   if (connection.textProvider === 'tao1' && connection.tao1 && typeof body.input === 'string') {
     report({ stage: progress.stage, message: `${progress.message} (through the TAO-1 API)…` });
     const payload = await tao1StructuredCall(connection.tao1, body);
-    recordResponse(progress.stage, connection.tao1.model, payload);
+    recordResponse(progress.stage, connection.tao1.model, payload, { provider: 'tao1' });
     return payload;
   }
   const headers = { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' };
@@ -994,7 +995,7 @@ async function generateImage(
       throw new Error(`Image generation failed (${response.status}).`);
     }
     const payload = (await response.json()) as { data?: Array<{ b64_json?: string; url?: string }> };
-    recordImage(`image-${mode}`, connection.imageModel, { usage: (payload as Record<string, unknown>).usage });
+    recordImage(`image-${mode}`, connection.imageModel, { usage: (payload as Record<string, unknown>).usage }, { size: imageOrientation === 'portrait' ? '1024x1536' : '1536x1024', quality: 'high' });
     const generated = payload.data?.[0];
     const image = generated?.b64_json ? `data:image/webp;base64,${generated.b64_json}` : generated?.url;
     if (!image) throw new Error('Image generation returned no image.');
@@ -1111,6 +1112,7 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
 }
 
 export async function POST(request: Request) {
+  const isAdmin = adminAuthorized(request);
   let prompt = '';
   let phase: 'draft' | 'enrich' = 'draft';
   let recovery = false;
@@ -1169,7 +1171,6 @@ export async function POST(request: Request) {
     report({ stage: 'cache', message: `Rejected a mismatched saved record (${loadedCachedAtlas.subject}); rebuilding ${prompt} safely…` });
   }
   // Force-refresh and deep-build rewrite saved atlases and spend heavily: only a caller holding ATLAS_ADMIN_SECRET may use them (the headers are ignored otherwise).
-  const isAdmin = adminAuthorized(request);
   const forceRefresh = isAdmin && request.headers.get('x-atlas-force-refresh') === '1';
   const deepBuildKey = isAdmin && request.headers.get('x-atlas-deep-build') === '1' && ['data-center', 'falcon-9'].includes(promptCacheKey)
     ? promptCacheKey
@@ -1423,13 +1424,17 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
   };
 
   const ledgerPhase = phase === 'enrich' ? 'enrich' : request.headers.get('x-atlas-deep-build') === '1' ? 'deep' : 'draft';
-  const runLedgered = (report: ProgressReporter) => runWithLedger(ledgerPhase, cacheKeyForPrompt(prompt), async () => {
+  // who triggered the build: an internal test (admin header), otherwise an anonymous visitor (a salted hash of the caller, never the raw address)
+  const who: BuildWho = isAdmin
+    ? { kind: 'internal-test', id: (request.headers.get('x-atlas-test-label') ?? 'admin').slice(0, 60) }
+    : { kind: 'anonymous', id: createHash('sha256').update(`${process.env.ATLAS_ADMIN_SECRET ?? 'atlas'}:${clientId(request)}`).digest('hex').slice(0, 16) };
+  const runLedgered = (report: ProgressReporter) => runWithLedger(ledgerPhase, cacheKeyForPrompt(prompt), who, async () => {
     try {
       const response = await run(report);
-      logLedger(response.ok ? 'ok' : `http_${response.status}`);
+      await finishLedger(response.ok ? (ledgerPhase === 'draft' ? 'draft_saved' : 'complete') : `failed_http_${response.status}`);
       return response;
     } catch (error) {
-      logLedger('error');
+      await finishLedger('failed_exception');
       throw error;
     }
   });
