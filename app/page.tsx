@@ -188,6 +188,7 @@ export default function FoundryHome() {
   const [shareStatus, setShareStatus] = useState<'idle' | 'copied' | 'shared'>('idle');
   const lastExplosionEventRef = useRef(-1);
   const randomArchiveRequestedRef = useRef(false);
+  const autoQueryRef = useRef(false);
 
   const archiveLayers = useMemo(
     () => atlas.archive?.layers
@@ -270,7 +271,7 @@ export default function FoundryHome() {
         // A shared atlas URL must remain stable. Plain homepage visits rotate
         // through complete illustrated archives, avoiding the previous pick so
         // each reload reveals a different subject when more than one exists.
-        const hasSharedAtlas = new URLSearchParams(window.location.search).has('atlas');
+        const hasSharedAtlas = new URLSearchParams(window.location.search).has('atlas') || new URLSearchParams(window.location.search).has('q');
         if (hasSharedAtlas || randomArchiveRequestedRef.current || items.length === 0) return;
         randomArchiveRequestedRef.current = true;
 
@@ -301,6 +302,16 @@ export default function FoundryHome() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const atlasKey = params.get('atlas');
+    // ?q=<topic> (a TAO-1 card): open the saved atlas for that topic, or build it in this visitor's browser; the server saves a finished build in the shared store.
+    const autoQuery = params.get('q')?.trim().slice(0, 160) ?? '';
+    if (!atlasKey && autoQuery.length >= 2) {
+      if (autoQueryRef.current) return;
+      autoQueryRef.current = true;
+      setPrompt(autoQuery);
+      trackAnalytics('query_link_open', { query: autoQuery });
+      void startBuild(autoQuery);
+      return;
+    }
     if (!atlasKey) return;
 
     const applyView = (nextAtlas: FoundryAtlas) => {
@@ -637,7 +648,10 @@ export default function FoundryHome() {
 
   async function buildAtlas(event: FormEvent) {
     event.preventDefault();
-    const subject = prompt.trim();
+    await startBuild(prompt.trim());
+  }
+
+  async function startBuild(subject: string) {
     if (!subject || generating) return;
     trackAnalytics('query_submit', { query: subject });
     if (/\b(human|anatomy|bodyparts3d)\b/i.test(subject)) {
@@ -791,7 +805,7 @@ export default function FoundryHome() {
           </div>
           <div className="foundry-mode">
             <i className={atlas.mode === 'generated' ? 'generated' : ''} />
-            <span><strong>{atlas.buildStage === 'draft' ? 'Fast first draft' : atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} components{atlas.buildStage === 'draft' ? ' · supplier research running' : supplierCount ? ` · ${supplierCount} vendors` : ''}</small></span>
+            <span><strong>{atlas.buildStage === 'draft' ? 'Fast first draft · supplier research not finished' : atlas.mode === 'generated' ? 'AI research atlas' : 'Curated demonstration'}</strong><small>{atlas.parts.length} components{atlas.buildStage === 'draft' ? ' · supplier research running' : supplierCount ? ` · ${supplierCount} vendors` : ''}</small></span>
           </div>
         </aside>
 
