@@ -1394,9 +1394,16 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     };
     let cacheWarning: string | undefined;
     try {
-      report({ stage: 'save', message: 'Saving the first draft so deeper research can continue independently…' });
-      atlas = await saveAtlasDraft({ ...atlas, buildCost: mergeBuildCost(undefined, summarizeLedger()) }, prompt);
-      report({ stage: 'done', message: 'First draft ready. Supplier and IP research is continuing in the background.' });
+      // A half-finished build is never saved as if it were whole: the saved gallery needs the matched image pair. Without both images the draft is shown to this
+      // visitor only (an admin test may keep a text-only draft with X-Atlas-Allow-Text-Only: 1). The build's usage is still recorded either way.
+      if ((!image || !explodedImage) && !(isAdmin && request.headers.get('x-atlas-allow-text-only') === '1')) {
+        cacheWarning = 'The first draft is ready, but it was not saved to the shared gallery because the matched image pair could not be generated.';
+        report({ stage: 'done', message: 'First draft ready; it was not saved because the images were unavailable.' });
+      } else {
+        report({ stage: 'save', message: 'Saving the first draft so deeper research can continue independently…' });
+        atlas = await saveAtlasDraft({ ...atlas, buildCost: mergeBuildCost(undefined, summarizeLedger()) }, prompt);
+        report({ stage: 'done', message: 'First draft ready. Supplier and IP research is continuing in the background.' });
+      }
     } catch (error) {
       console.warn('Atlas generated but could not be added to the gallery', error);
       cacheWarning = 'The first draft is ready, but background enrichment cannot start because temporary storage was unavailable.';
