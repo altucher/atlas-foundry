@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
-import { tao1GenerateImage, tao1VisionText } from '@/app/tao1-image';
+import { chutesGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
@@ -113,6 +113,7 @@ type AiConnection = {
   textProvider?: 'openai' | 'tao1';
   /** images through TAO-1's media path (Chutes) and image QA / hotspot vision through a TAO-1 vision cell; both default to OpenAI */
   imageProvider?: 'openai' | 'chutes';
+  chutesKey?: string;
   visionProvider?: 'openai' | 'tao1';
   tao1?: Tao1Connection;
 };
@@ -135,7 +136,8 @@ function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', ima
   return {
     ...base, tao1: tao1 ?? undefined,
     textProvider: tao1 && wanted === 'tao1' ? 'tao1' : 'openai',
-    imageProvider: tao1 && imageWanted === 'chutes' ? 'chutes' : 'openai',
+    imageProvider: process.env.CHUTES_API_KEY?.trim() && imageWanted === 'chutes' ? 'chutes' : 'openai',
+    chutesKey: process.env.CHUTES_API_KEY?.trim() || undefined,
     visionProvider: tao1 && visionWanted === 'tao1' ? 'tao1' : 'openai',
   };
 }
@@ -1003,10 +1005,11 @@ async function generateImage(
 
   let retryDirection = '';
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (connection.imageProvider === 'chutes' && connection.tao1) {
-      // Chutes (qwen-image-2512, z-image-turbo fallback) through TAO-1's media path; same prompts, same QA and retry as the OpenAI path below
-      const generated = await tao1GenerateImage(connection.tao1, `${sharedDirection} ${modeDirection}${retryDirection}`);
-      recordImage(`image-${mode}`, 'chutes/qwen-image-2512', { usage: generated.usage ? { input_tokens: generated.usage.prompt_tokens, output_tokens: generated.usage.completion_tokens } : undefined }, { size: generated.width && generated.height ? `${generated.width}x${generated.height}` : undefined, quality: 'chutes', provider: 'tao1', ms: generated.ms });
+    if (connection.imageProvider === 'chutes' && connection.chutesKey) {
+      // Chutes (qwen-image-2512, z-image-turbo fallback) called directly (interim; the TAO-1 images endpoint replaces this): same prompts, same QA and retry as the OpenAI path below
+      const chutesDirection = mode === 'exploded' ? ' STYLE: an exploded technical diagram on one clean studio backdrop: every part separated along its assembly axes with generous spacing, nothing left assembled, and no complete intact product anywhere in the frame.' : '';
+      const generated = await chutesGenerateImage(connection.chutesKey, `${sharedDirection} ${modeDirection}${chutesDirection}${retryDirection}`, imageOrientation === 'portrait' ? 'portrait' : 'landscape');
+      recordImage(`image-${mode}`, generated.model, { usage: undefined }, { size: generated.width && generated.height ? `${generated.width}x${generated.height}` : undefined, quality: 'chutes', provider: 'other', ms: generated.ms });
       const image = generated.dataUrl;
       try {
         const assessment = await assessGeneratedImage(connection, image, subject, mode);

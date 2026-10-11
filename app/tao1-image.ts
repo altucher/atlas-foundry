@@ -70,3 +70,43 @@ export async function tao1VisionText(conn: Tao1Connection, system: string, userT
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
   return { text: payload.choices?.[0]?.message?.content ?? '', usage: payload.usage ?? null, ms: Date.now() - t0 };
 }
+
+// DIRECT CHUTE CALL (interim, founder 10-12): the same chutes the TAO-1 media harness uses (src/harnesses/media.mjs there: POST <chute>/generate {prompt}, the reply body is the
+// image file, 502/503 = cold chute), called from the atlas server with CHUTES_API_KEY, with width/height for a landscape or portrait plate. qwen-image-2512 first, z-image-turbo
+// as the fast fallback. A 4xx that rejects the size fields is retried once with the prompt alone.
+const CHUTES_IMAGE = [
+  { label: 'chutes/qwen-image-2512', url: 'https://vonkaiser-qwen-image-2512.chutes.ai/generate' },
+  { label: 'chutes/z-image-turbo', url: 'https://vonkaiser-z-image-turbo.chutes.ai/generate' },
+];
+
+export type ChutesImageResult = Tao1ImageResult & { model: string };
+
+export async function chutesGenerateImage(apiKey: string, prompt: string, orientation: 'landscape' | 'portrait'): Promise<ChutesImageResult> {
+  const t0 = Date.now();
+  const sized = orientation === 'portrait' ? { width: 1024, height: 1536 } : { width: 1536, height: 1024 };
+  const errors: string[] = [];
+  for (const chute of CHUTES_IMAGE) {
+    for (const body of [{ prompt, ...sized }, { prompt }]) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        let response;
+        try {
+          response = await undiciFetch(chute.url, { dispatcher, method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        } catch (error) { errors.push(`${chute.label}: ${error instanceof Error ? error.message : 'request failed'}`); break; }
+        if ((response.status === 502 || response.status === 503) && attempt < 2) { await new Promise((resolve) => setTimeout(resolve, 8000)); continue; }
+        if (!response.ok) {
+          errors.push(`${chute.label}: HTTP ${response.status}`);
+          if (response.status === 402 || response.status === 401) throw new Error(`Chutes refused the request (${response.status}): ${errors.join('; ')}`);
+          break;
+        }
+        const buf = Buffer.from(await response.arrayBuffer());
+        const mime = (response.headers.get('content-type') ?? 'image/png').split(';')[0];
+        if (buf.length < 1000 || !/^image\/(png|jpeg|webp)$/.test(mime)) { errors.push(`${chute.label}: empty or unexpected reply`); break; }
+        const size = imageSize(buf);
+        return { model: chute.label, dataUrl: `data:${mime};base64,${buf.toString('base64')}`, mime, bytes: buf.length, ms: Date.now() - t0, sourceUrl: chute.url, usage: null, width: size?.w ?? null, height: size?.h ?? null };
+      }
+      if (errors.length && /HTTP (400|422)/.test(errors[errors.length - 1]) && 'width' in body) continue; // the chute rejected the size fields: try the prompt alone
+      else break;
+    }
+  }
+  throw new Error(`Chutes image generation failed: ${errors.join('; ').slice(0, 400)}`);
+}
