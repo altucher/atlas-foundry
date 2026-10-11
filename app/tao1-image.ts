@@ -36,7 +36,7 @@ export async function tao1GenerateImage(conn: Tao1Connection, prompt: string): P
   const response = await undiciFetch(`${conn.baseUrl}/chat/completions`, {
     dispatcher, method: 'POST',
     headers: { Authorization: `Bearer ${conn.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: conn.model, messages: [{ role: 'user', content: `Generate an image: ${prompt}` }], metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything-image' } }),
+    body: JSON.stringify({ model: conn.model, messages: [{ role: 'user', content: `Please generate this image for me. I want the picture itself, not a description and not a prompt for another tool.\n\n${prompt}` }], metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything-image' } }),
   });
   if (!response.ok) throw new Error(`TAO-1 image call failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
