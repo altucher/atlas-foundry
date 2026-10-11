@@ -636,8 +636,9 @@ a { color: inherit; }
   .build-journal-feed { max-height: 390px; margin-block: 18px 14px; }
   .build-journal-feed p { grid-template-columns: 58px minmax(0, 1fr); gap: 9px; font-size: 9px; }
   .foundry-assembly { top: 43%; width: 91%; }
-  .foundry-assembly.rich-assembled { top: 36%; width: 118%; }
-  .foundry-exploded-visual { top: 36%; width: 118%; }
+  /* 118% cropped the outer parts of the picture on a phone (parts 02, 11, 39 half hidden); the whole picture now fits the stage */
+  .foundry-assembly.rich-assembled { top: 36%; width: 100%; }
+  .foundry-exploded-visual { top: 36%; width: 100%; }
   .foundry-assembly.rich-assembled.portrait { top: 42%; width: 86%; }
   .foundry-exploded-visual.portrait { top: 42%; width: 86%; }
   .foundry-art-badge { left: 10%; bottom: -27px; max-width: 80%; line-height: 1.5; }
@@ -922,7 +923,13 @@ a { color: inherit; }
 .foundry-shell.embed .embed-notice { margin: 10px; }
 .foundry-embed-link { position: absolute; right: 12px; bottom: 8px; z-index: 5; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: #090a09cc; color: var(--primary); font-size: 11px; letter-spacing: .08em; text-decoration: none; }
 .foundry-embed-link:hover { background: var(--accent); }
-@media (max-width: 760px) { .foundry-shell.embed .foundry-stage { min-height: 560px; } }
+@media (max-width: 760px) {
+  /* in a narrow chat frame the picture comes first, then the index and the part record */
+  .foundry-shell.embed .foundry-workbench { display: flex; flex-direction: column; }
+  .foundry-shell.embed .foundry-stage { order: -1; min-height: 560px; }
+  .foundry-shell.embed .foundry-index { order: 1; }
+  .foundry-shell.embed .foundry-detail { order: 2; }
+}
 /* best-effort light theme for the embed: invert the dark UI and restore the pictures */
 .foundry-shell.embed[data-theme='light'] { filter: invert(.93) hue-rotate(180deg); background: #f4f1ea; }
 .foundry-shell.embed[data-theme='light'] img, .foundry-shell.embed[data-theme='light'] video, .foundry-shell.embed[data-theme='light'] canvas { filter: invert(1) hue-rotate(180deg); }
