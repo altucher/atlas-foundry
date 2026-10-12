@@ -94,7 +94,8 @@ export async function chutesGenerateImage(apiKey: string, prompt: string, orient
         } catch (error) { errors.push(`${chute.label}: ${error instanceof Error ? error.message : 'request failed'}`); break; }
         if ((response.status === 502 || response.status === 503) && attempt < 2) { await new Promise((resolve) => setTimeout(resolve, 8000)); continue; }
         if (!response.ok) {
-          errors.push(`${chute.label}: HTTP ${response.status}`);
+          const detail = (await response.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160);
+          errors.push(`${chute.label}: HTTP ${response.status}${detail ? ` ${detail}` : ''}`);
           if (response.status === 402 || response.status === 401) throw new Error(`Chutes refused the request (${response.status}): ${errors.join('; ')}`);
           break;
         }
