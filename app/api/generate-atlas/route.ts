@@ -985,6 +985,13 @@ async function deepenFalconNineArchive(
   return saved;
 }
 
+function explodedAttemptsFor(request: Request, isAdmin: boolean) {
+  const asked = isAdmin ? Number(request.headers.get('x-atlas-exploded-attempts')) : NaN;
+  const base = Number(process.env.ATLAS_EXPLODED_ATTEMPTS);
+  const n = Number.isFinite(asked) && asked >= 1 ? asked : Number.isFinite(base) && base >= 1 ? base : 1;
+  return Math.min(3, Math.floor(n));
+}
+
 async function generateImage(
   connection: AiConnection,
   subject: string,
@@ -992,6 +999,7 @@ async function generateImage(
   mode: 'assembled' | 'exploded',
   parts: AtlasPart[],
   imageOrientation: FoundryAtlas['imageOrientation'],
+  explodedAttempts = 1,
 ) {
   const componentList = parts.map((part, index) => `${index + 1}. ${part.name} (${part.system})`).join('\n');
   const formatDirection = imageOrientation === 'portrait'
@@ -1003,9 +1011,9 @@ async function generateImage(
     : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. CRITICAL COMPOSITION RULE: depict the parts from exactly one product, with the product fully disassembled. There must be ZERO intact or usable assembled copies of the product anywhere in the image. Do not add a reference product, second product, comparison view, inset, duplicated display/screen, or side-by-side assembled object. Separate the outer shell, display or cover, input surfaces, internal boards, battery or power system, structural pieces, and connectors so no combination still reads as an intact product. Distribute the components broadly and evenly across the useful canvas; do not gather them into a central pile. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
 
   let retryDirection = '';
-  // Chutes exploded views are strict (Master 10-12): up to 3 real attempts, the QA must pass, and an exploded image that never passes is left out (the atlas then shows the inventory view)
+  // Chutes exploded views are strict (Master 10-12): live clicks make 1 attempt (a person is waiting); prebuild/background builds (admin header x-atlas-exploded-attempts, 1-3) retry, the QA must pass, and an exploded image that never passes is left out (the atlas then shows the inventory view)
   const strictExploded = mode === 'exploded' && connection.imageProvider === 'chutes';
-  const attempts = connection.imageProvider === 'chutes' ? 3 : 2;
+  const attempts = connection.imageProvider === 'chutes' ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const lastAttempt = attempt === attempts - 1;
     if (connection.imageProvider === 'chutes' && connection.chutesKey) {
@@ -1441,7 +1449,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     const imageResults = await Promise.allSettled([
       generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
         .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation)
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin))
         .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
     ]);
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
