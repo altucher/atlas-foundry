@@ -4,7 +4,7 @@ import { Agent, fetch as undiciFetch } from 'undici';
 import { isBlockedKey, refusedSubject } from '@/app/blocked-atlases';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
 import { jobsAuthorized } from '@/app/atlas-jobs';
-import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText } from '@/app/tao1-image';
+import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText, hunyuanGenerateImage, chutesRemoveText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
@@ -117,6 +117,8 @@ type AiConnection = {
   chutesKey?: string;
   openrouterKey?: string;
   explodedModel?: string;
+  /** open-weight exploded views: HunyuanImage-3.0-Instruct-Distil on a RunPod serverless endpoint (ATLAS_EXPLODED_PROVIDER=hunyuan + RUNPOD_API_KEY + ATLAS_HUNYUAN_ENDPOINT) */
+  hunyuan?: { endpoint: string; apiKey: string };
   visionProvider?: 'openai' | 'tao1';
   tao1?: Tao1Connection;
 };
@@ -144,6 +146,9 @@ function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', ima
     // exploded views on OpenRouter (ATLAS_EXPLODED_PROVIDER=openrouter + OPENROUTER_API_KEY): the cheapest model that draws a real exploded diagram
     openrouterKey: process.env.ATLAS_EXPLODED_PROVIDER?.trim().toLowerCase() === 'openrouter' ? process.env.OPENROUTER_API_KEY?.trim() || undefined : undefined,
     explodedModel: process.env.ATLAS_EXPLODED_MODEL?.trim() || 'google/gemini-3.1-flash-image',
+    hunyuan: process.env.ATLAS_EXPLODED_PROVIDER?.trim().toLowerCase() === 'hunyuan' && process.env.RUNPOD_API_KEY?.trim() && process.env.ATLAS_HUNYUAN_ENDPOINT?.trim()
+      ? { endpoint: process.env.ATLAS_HUNYUAN_ENDPOINT.trim(), apiKey: process.env.RUNPOD_API_KEY.trim() }
+      : undefined,
     visionProvider: tao1 && visionWanted === 'tao1' ? 'tao1' : 'openai',
   };
 }
@@ -155,7 +160,7 @@ function reportedModels(connection: AiConnection, deep = false) {
   return {
     researchModel: tao1Text ?? (deep ? connection.deepResearchModel : connection.draftModel),
     supplierResearchModel: tao1Text ?? connection.supplierResearchModel,
-    imageModel: connection.openrouterKey ? `${image} + ${connection.explodedModel ?? 'google/gemini-3.1-flash-image'}` : image,
+    imageModel: connection.hunyuan ? `${image} + tencent/HunyuanImage-3.0-Instruct-Distil` : connection.openrouterKey ? `${image} + ${connection.explodedModel ?? 'google/gemini-3.1-flash-image'}` : image,
   };
 }
 
@@ -1037,11 +1042,41 @@ async function generateImage(
 
   let retryDirection = '';
   // Chutes exploded views are strict (Master 10-12): live clicks make 1 attempt (a person is waiting); prebuild/background builds (admin header x-atlas-exploded-attempts, 1-3) retry, the QA must pass, and an exploded image that never passes is left out (the atlas then shows the inventory view)
+  const hyExploded = mode === 'exploded' && Boolean(connection.hunyuan);
   const orExploded = mode === 'exploded' && Boolean(connection.openrouterKey);
-  const strictExploded = mode === 'exploded' && (connection.imageProvider === 'chutes' || orExploded);
-  const attempts = (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
+  const strictExploded = mode === 'exploded' && (connection.imageProvider === 'chutes' || orExploded || hyExploded);
+  const attempts = hyExploded ? Math.max(1, Number(process.env.ATLAS_HUNYUAN_ATTEMPTS) || 6) : (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const lastAttempt = attempt === attempts - 1;
+    if (hyExploded && connection.hunyuan) {
+      const hyPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
+      const generated = await hunyuanGenerateImage(connection.hunyuan.endpoint, connection.hunyuan.apiKey, hyPrompt).catch((error: unknown) => { console.warn('Hunyuan image call failed', error); return null; });
+      if (!generated) { if (lastAttempt) throw new Error('Exploded view: the image service returned no image.'); continue; }
+      recordImage(`image-${mode}`, generated.model, { usage: undefined }, { quality: 'hunyuan', provider: 'other', ms: generated.ms, usd: generated.cost ?? undefined });
+      try {
+        // judge the LAYOUT first (the open model paints pseudo-text), then remove all lettering with an open-weight edit model and run the full strict QA on what a person will see
+        const layout = await assessGeneratedImage(connection, generated.dataUrl, subject, mode, true);
+        if (!layout.pass) {
+          if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${layout.issues.join(' ').slice(0, 200)}`);
+          retryDirection = correctionFor(layout.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
+          continue;
+        }
+        let finalImage = generated.dataUrl;
+        if (connection.chutesKey) {
+          const cleaned = await chutesRemoveText(connection.chutesKey, generated.dataUrl).catch((error: unknown) => { console.warn('Text removal failed', error); return null; });
+          if (cleaned) { recordImage('image-text-removal', cleaned.model, { usage: undefined }, { quality: 'chutes', provider: 'other', ms: cleaned.ms }); finalImage = cleaned.dataUrl; }
+        }
+        const strict = await assessGeneratedImage(connection, finalImage, subject, mode);
+        if (strict.pass) return finalImage;
+        if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${strict.issues.join(' ').slice(0, 200)}`);
+        retryDirection = correctionFor(strict.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
+      } catch (error) {
+        if (/did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
+        console.warn('Hunyuan exploded QA unavailable', error);
+        if (lastAttempt) throw new Error('Exploded view could not be checked by visual QA.');
+      }
+      continue;
+    }
     if (orExploded && connection.openrouterKey) {
       const orPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
       const generated = await openrouterGenerateImage(connection.openrouterKey, attempt < 1 ? (connection.explodedModel ?? 'google/gemini-3.1-flash-image') : (process.env.ATLAS_EXPLODED_FALLBACK_MODEL?.trim() || 'google/gemini-3.1-flash-lite-image'), orPrompt).catch((error: unknown) => { console.warn('OpenRouter image call failed', error); return null; });
@@ -1126,6 +1161,7 @@ async function assessGeneratedImage(
   image: string,
   subject: string,
   mode: 'assembled' | 'exploded',
+  layoutOnly = false,
 ) {
   const schema = {
     type: 'object',
@@ -1136,7 +1172,8 @@ async function assessGeneratedImage(
       issues: { type: 'array', items: { type: 'string' }, maxItems: 8 },
     },
   } as const;
-  const passRule = mode === 'assembled'
+  const layoutRule = 'Pass only when no complete intact assembled product is shown (neither dominating the frame nor beside the parts), the visible pieces all belong to one disassembled subject, and components are distinct and distributed across the useful frame rather than piled at its center. Repeated parts and repeated sub-assemblies are allowed. IGNORE any text, lettering, labels, numbers or pseudo-text completely: they are removed later and must not affect the verdict. Judge only the exploded LAYOUT.';
+  const passRule = layoutOnly && mode === 'exploded' ? layoutRule : mode === 'assembled'
     ? 'Pass only when exactly one intact subject is shown, it is fully visible, it occupies most of the useful frame, and there is no second copy, exploded arrangement, inset, or excessive empty border.'
     : 'Pass only when no complete intact assembled product is shown (neither dominating the frame nor beside the parts), the visible pieces all belong to one disassembled subject, components are distinct and distributed across the useful frame rather than piled at its center. Repeated parts and repeated sub-assemblies are allowed. FAIL when the image contains visible text, labels, letters or numbers that are garbled, misspelled, irrelevant or illegible; legible and correct labels are acceptable.';
   const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a complete reference copy merely because other parts are exploded.`
