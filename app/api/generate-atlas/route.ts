@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
-import { chutesGenerateImage, tao1VisionText } from '@/app/tao1-image';
+import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
@@ -113,6 +113,8 @@ type AiConnection = {
   /** images through TAO-1's media path (Chutes) and image QA / hotspot vision through a TAO-1 vision cell; both default to OpenAI */
   imageProvider?: 'openai' | 'chutes';
   chutesKey?: string;
+  openrouterKey?: string;
+  explodedModel?: string;
   visionProvider?: 'openai' | 'tao1';
   tao1?: Tao1Connection;
 };
@@ -137,6 +139,9 @@ function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', ima
     textProvider: tao1 && wanted === 'tao1' ? 'tao1' : 'openai',
     imageProvider: process.env.CHUTES_API_KEY?.trim() && imageWanted === 'chutes' ? 'chutes' : 'openai',
     chutesKey: process.env.CHUTES_API_KEY?.trim() || undefined,
+    // exploded views on OpenRouter (ATLAS_EXPLODED_PROVIDER=openrouter + OPENROUTER_API_KEY): the cheapest model that draws a real exploded diagram
+    openrouterKey: process.env.ATLAS_EXPLODED_PROVIDER?.trim().toLowerCase() === 'openrouter' ? process.env.OPENROUTER_API_KEY?.trim() || undefined : undefined,
+    explodedModel: process.env.ATLAS_EXPLODED_MODEL?.trim() || 'google/gemini-3.1-flash-lite-image',
     visionProvider: tao1 && visionWanted === 'tao1' ? 'tao1' : 'openai',
   };
 }
@@ -985,10 +990,10 @@ async function deepenFalconNineArchive(
   return saved;
 }
 
-function explodedAttemptsFor(request: Request, isAdmin: boolean) {
+function explodedAttemptsFor(request: Request, isAdmin: boolean, fallbackAttempts = 1) {
   const asked = isAdmin ? Number(request.headers.get('x-atlas-exploded-attempts')) : NaN;
   const base = Number(process.env.ATLAS_EXPLODED_ATTEMPTS);
-  const n = Number.isFinite(asked) && asked >= 1 ? asked : Number.isFinite(base) && base >= 1 ? base : 1;
+  const n = Number.isFinite(asked) && asked >= 1 ? asked : Number.isFinite(base) && base >= 1 ? base : fallbackAttempts;
   return Math.min(3, Math.floor(n));
 }
 
@@ -1012,10 +1017,27 @@ async function generateImage(
 
   let retryDirection = '';
   // Chutes exploded views are strict (Master 10-12): live clicks make 1 attempt (a person is waiting); prebuild/background builds (admin header x-atlas-exploded-attempts, 1-3) retry, the QA must pass, and an exploded image that never passes is left out (the atlas then shows the inventory view)
-  const strictExploded = mode === 'exploded' && connection.imageProvider === 'chutes';
-  const attempts = connection.imageProvider === 'chutes' ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
+  const orExploded = mode === 'exploded' && Boolean(connection.openrouterKey);
+  const strictExploded = mode === 'exploded' && (connection.imageProvider === 'chutes' || orExploded);
+  const attempts = (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const lastAttempt = attempt === attempts - 1;
+    if (orExploded && connection.openrouterKey) {
+      const orPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
+      const generated = await openrouterGenerateImage(connection.openrouterKey, attempt < 2 ? (connection.explodedModel ?? 'google/gemini-3.1-flash-lite-image') : (process.env.ATLAS_EXPLODED_FALLBACK_MODEL?.trim() || 'google/gemini-3.1-flash-image'), orPrompt);
+      recordImage(`image-${mode}`, generated.model, { usage: undefined }, { quality: 'openrouter', provider: 'other', ms: generated.ms, usd: generated.cost ?? undefined });
+      try {
+        const assessment = await assessGeneratedImage(connection, generated.dataUrl, subject, mode);
+        if (assessment.pass) return generated.dataUrl;
+        if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${assessment.issues.join(' ').slice(0, 200)}`);
+        retryDirection = `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${assessment.issues.join(' ')} Recompose from scratch with no intact product anywhere in the frame.`;
+      } catch (error) {
+        if (/did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
+        console.warn('Image composition QA unavailable', error);
+        if (lastAttempt) throw new Error('Exploded view could not be checked by visual QA.');
+      }
+      continue;
+    }
     if (connection.imageProvider === 'chutes' && connection.chutesKey) {
       // Chutes (qwen-image-2512, z-image-turbo fallback) called directly (interim; the TAO-1 images endpoint replaces this): same prompts, same QA and retry as the OpenAI path below
       const chutesDirection = mode === 'exploded' ? ' STYLE: an exploded technical diagram on one clean studio backdrop: every part separated along its assembly axes with generous spacing, nothing left assembled, and no complete intact product anywhere in the frame.' : '';
@@ -1095,8 +1117,8 @@ async function assessGeneratedImage(
   } as const;
   const passRule = mode === 'assembled'
     ? 'Pass only when exactly one intact subject is shown, it is fully visible, it occupies most of the useful frame, and there is no second copy, exploded arrangement, inset, or excessive empty border.'
-    : 'Pass only when zero intact assembled products are shown, no major assembly such as a display is duplicated, the visible pieces all belong to one disassembled subject, components are distinct and non-overlapping, and they are distributed across the useful frame rather than piled at its center.';
-  const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a reference copy merely because other parts are exploded.`
+    : 'Pass only when no complete intact assembled product is shown (neither dominating the frame nor beside the parts), the visible pieces all belong to one disassembled subject, components are distinct and distributed across the useful frame rather than piled at its center. Repeated parts and repeated sub-assemblies are allowed. FAIL when the image contains visible text, labels, letters or numbers that are garbled, misspelled, irrelevant or illegible; legible and correct labels are acceptable.';
+  const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a complete reference copy merely because other parts are exploded.`
   if (connection.visionProvider === 'tao1' && connection.tao1) {
     const r = await tao1VisionText(connection.tao1, `${qaInstructions}\nReply with ONE JSON object and nothing else: {"pass": boolean, "issues": [short strings, at most 8]}.`, 'Inspect this image.', image, 1500);
     recordResponse('image-qa', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
@@ -1449,7 +1471,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     const imageResults = await Promise.allSettled([
       generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
         .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin))
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin, connection.openrouterKey ? 3 : 1))
         .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
     ]);
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
