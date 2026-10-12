@@ -1011,7 +1011,11 @@ async function generateImage(
     if (connection.imageProvider === 'chutes' && connection.chutesKey) {
       // Chutes (qwen-image-2512, z-image-turbo fallback) called directly (interim; the TAO-1 images endpoint replaces this): same prompts, same QA and retry as the OpenAI path below
       const chutesDirection = mode === 'exploded' ? ' STYLE: an exploded technical diagram on one clean studio backdrop: every part separated along its assembly axes with generous spacing, nothing left assembled, and no complete intact product anywhere in the frame.' : '';
-      const generated = await chutesGenerateImage(connection.chutesKey, `${sharedDirection} ${modeDirection}${chutesDirection}${retryDirection}`, imageOrientation === 'portrait' ? 'portrait' : 'landscape');
+      // Exploded views use a short technical-illustration prompt (the long museum-studio prompt made the chutes draw the intact product plus a few loose parts)
+      const chutesPrompt = mode === 'exploded'
+        ? `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere, no text, no labels. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`
+        : `${sharedDirection} ${modeDirection}${chutesDirection}${retryDirection}`;
+      const generated = await chutesGenerateImage(connection.chutesKey, chutesPrompt, imageOrientation === 'portrait' ? 'portrait' : 'landscape');
       recordImage(`image-${mode}`, generated.model, { usage: undefined }, { size: generated.width && generated.height ? `${generated.width}x${generated.height}` : undefined, quality: 'chutes', provider: 'other', ms: generated.ms });
       const image = generated.dataUrl;
       try {
