@@ -169,7 +169,7 @@ function galleryItem(atlas: FoundryAtlas, fallbackKey: string): AtlasGalleryItem
 }
 
 function hasGeneratedImagePair(atlas: FoundryAtlas) {
-  return Boolean(atlas.image?.trim() && atlas.explodedImage?.trim());
+  return Boolean(atlas.image?.trim());
 }
 
 // THE GALLERY LIST (AI2 2026-10-11): the old list fetched every saved atlas.json at once (about 250 files), ran out of sockets (EMFILE) and returned 503 for the

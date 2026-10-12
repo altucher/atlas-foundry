@@ -1003,7 +1003,11 @@ async function generateImage(
     : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. CRITICAL COMPOSITION RULE: depict the parts from exactly one product, with the product fully disassembled. There must be ZERO intact or usable assembled copies of the product anywhere in the image. Do not add a reference product, second product, comparison view, inset, duplicated display/screen, or side-by-side assembled object. Separate the outer shell, display or cover, input surfaces, internal boards, battery or power system, structural pieces, and connectors so no combination still reads as an intact product. Distribute the components broadly and evenly across the useful canvas; do not gather them into a central pile. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
 
   let retryDirection = '';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Chutes exploded views are strict (Master 10-12): up to 3 real attempts, the QA must pass, and an exploded image that never passes is left out (the atlas then shows the inventory view)
+  const strictExploded = mode === 'exploded' && connection.imageProvider === 'chutes';
+  const attempts = connection.imageProvider === 'chutes' ? 3 : 2;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const lastAttempt = attempt === attempts - 1;
     if (connection.imageProvider === 'chutes' && connection.chutesKey) {
       // Chutes (qwen-image-2512, z-image-turbo fallback) called directly (interim; the TAO-1 images endpoint replaces this): same prompts, same QA and retry as the OpenAI path below
       const chutesDirection = mode === 'exploded' ? ' STYLE: an exploded technical diagram on one clean studio backdrop: every part separated along its assembly axes with generous spacing, nothing left assembled, and no complete intact product anywhere in the frame.' : '';
@@ -1012,10 +1016,13 @@ async function generateImage(
       const image = generated.dataUrl;
       try {
         const assessment = await assessGeneratedImage(connection, image, subject, mode);
-        if (assessment.pass || attempt === 1) return image;
-        retryDirection = `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${assessment.issues.join(' ')} Recompose from scratch and satisfy every critical composition rule.`;
+        if (assessment.pass || (lastAttempt && !strictExploded)) return image;
+        if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${assessment.issues.join(' ').slice(0, 200)}`);
+        retryDirection = `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${assessment.issues.join(' ')} Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.`;
       } catch (error) {
+        if (strictExploded && /did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
         console.warn('Image composition QA unavailable', error);
+        if (strictExploded) { if (lastAttempt) throw new Error('Exploded view could not be checked by visual QA.'); continue; }
         return image;
       }
       continue;
@@ -1468,7 +1475,9 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     try {
       // A half-finished build is never saved as if it were whole: the saved gallery needs the matched image pair. Without both images the draft is shown to this
       // visitor only (an admin test may keep a text-only draft with X-Atlas-Allow-Text-Only: 1). The build's usage is still recorded either way.
-      if ((!image || !explodedImage) && !(isAdmin && request.headers.get('x-atlas-allow-text-only') === '1')) {
+      // Chutes interim: an assembled image alone is saved (inventory view) when no exploded image passed the strict QA
+      const needExploded = connection.imageProvider !== 'chutes';
+      if ((!image || (needExploded && !explodedImage)) && !(isAdmin && request.headers.get('x-atlas-allow-text-only') === '1')) {
         cacheWarning = 'The first draft is ready, but it was not saved to the shared gallery because the matched image pair could not be generated.';
         noteLedger('draft_not_saved_no_images');
         report({ stage: 'done', message: 'First draft ready; it was not saved because the images were unavailable.' });
