@@ -1,5 +1,6 @@
 import { head, list, put, type ListBlobResultBlob } from '@vercel/blob';
 
+import { isBlockedKey } from './blocked-atlases';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasGalleryItem, type FoundryAtlas } from './foundry-data';
 
 const defaultGalleryPrefix = 'atlas-foundry/v1';
@@ -58,7 +59,7 @@ async function readAtlasUrl(url: string) {
 }
 
 export async function loadCachedAtlas(cacheKey: string) {
-  if (!hasSharedAtlasStore()) return null;
+  if (!hasSharedAtlasStore() || isBlockedKey(cacheKey)) return null;
   const candidateKeys = cacheKey === 'falcon-9'
     ? ['falcon-9', 'falcon-9-block-5-launch-vehicle']
     : [cacheKey];
@@ -75,7 +76,7 @@ export async function loadCachedAtlas(cacheKey: string) {
 }
 
 export async function loadAtlasDraft(cacheKey: string) {
-  if (!hasSharedAtlasStore()) return null;
+  if (!hasSharedAtlasStore() || isBlockedKey(cacheKey)) return null;
   try {
     const blob = await head(draftPath(cacheKey));
     return await readAtlasUrl(blob.url);
@@ -89,7 +90,7 @@ export function isSafeCacheKey(value: string) {
 }
 
 export async function loadGalleryAtlas(cacheKey: string) {
-  if (!isSafeCacheKey(cacheKey)) return null;
+  if (!isSafeCacheKey(cacheKey) || isBlockedKey(cacheKey)) return null;
   return await loadCachedAtlas(cacheKey) ?? await loadAtlasDraft(cacheKey);
 }
 
@@ -283,6 +284,10 @@ async function rebuildGalleryIndex(previous: GalleryIndex | null): Promise<Atlas
 }
 
 export async function refreshGalleryIndex() {
+  return (await refreshGalleryIndexRaw()).filter((item) => !isBlockedKey(item.cacheKey));
+}
+
+async function refreshGalleryIndexRaw() {
   if (!hasSharedAtlasStore()) return [];
   galleryRebuild ??= (async () => {
     try {
@@ -297,6 +302,10 @@ export async function refreshGalleryIndex() {
 }
 
 export async function listGalleryAtlases() {
+  return (await listGalleryAtlasesRaw()).filter((item) => !isBlockedKey(item.cacheKey));
+}
+
+async function listGalleryAtlasesRaw() {
   if (!hasSharedAtlasStore()) return [];
   if (galleryMemory && Date.now() - galleryMemory.at < galleryMemoryMs) return galleryMemory.items;
   const index = await readGalleryIndex();
@@ -306,7 +315,7 @@ export async function listGalleryAtlases() {
     return items;
   }
   try {
-    return await refreshGalleryIndex();
+    return await refreshGalleryIndexRaw();
   } catch (error) {
     console.error('Gallery rebuild failed', error);
     if (index) return itemsFromEntries(index.entries);

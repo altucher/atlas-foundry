@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { isBlockedKey, refusedSubject } from '@/app/blocked-atlases';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
+import { jobsAuthorized } from '@/app/atlas-jobs';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
-import { finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
+import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
 import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
@@ -1247,6 +1249,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Prompt must be between 2 and 160 characters.' }, { status: 400 });
   }
   const researchPrompt = canonicalResearchPrompt(prompt);
+  // weapon-class subjects are neither built nor served (app/blocked-atlases.ts)
+  if (refusedSubject(prompt) || isBlockedKey(cacheKeyForPrompt(prompt))) {
+    return NextResponse.json({ error: 'This subject is not available.' }, { status: 422 });
+  }
 
   const cacheOrigin = process.env.ATLAS_CACHE_ORIGIN?.trim();
   if (cacheOrigin) {
@@ -1572,10 +1578,16 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
 
   const ledgerPhase = phase === 'enrich' ? 'enrich' : request.headers.get('x-atlas-deep-build') === '1' ? 'deep' : 'draft';
   // who triggered the build: an internal test (admin header), otherwise an anonymous visitor (a salted hash of the caller, never the raw address)
-  const who: BuildWho = isAdmin
+  // a build started by the on-demand jobs endpoint (jtao's server, proven by x-atlas-jobs-key) carries the paying user/session in x-atlas-who so every ledger row, also a failed one, can be billed
+  const jobsWho = jobsAuthorized(request) ? request.headers.get('x-atlas-who')?.trim().slice(0, 60) : '';
+  const who: BuildWho = jobsWho
+    ? { kind: 'tao1', id: jobsWho }
+    : isAdmin
     ? { kind: 'internal-test', id: (request.headers.get('x-atlas-test-label') ?? 'admin').slice(0, 60) }
     : { kind: 'anonymous', id: createHash('sha256').update(`${process.env.ATLAS_ADMIN_SECRET ?? 'atlas'}:${clientId(request)}`).digest('hex').slice(0, 16) };
+  let ledgerBuildId: string | undefined;
   const runLedgered = (report: ProgressReporter) => runWithLedger(ledgerPhase, cacheKeyForPrompt(prompt), who, async () => {
+    ledgerBuildId = currentBuildId() ?? undefined;
     try {
       const response = await run(report);
       await finishLedger(response.ok ? (ledgerPhase === 'draft' ? 'draft_saved' : 'complete') : `failed_http_${response.status}`);
@@ -1594,7 +1606,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
         try {
           const response = await runLedgered((entry) => send({ type: 'progress', ...entry }));
           const payload = await response.json();
-          send({ type: 'result', status: response.status, payload });
+          send({ type: 'result', status: response.status, payload, buildId: ledgerBuildId });
         } catch (error) {
           console.error('Atlas progress stream failed', error);
           send({ type: 'result', status: 500, payload: { error: 'The atlas could not be generated.' } });
