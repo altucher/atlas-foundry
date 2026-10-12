@@ -121,7 +121,7 @@ export async function chutesGenerateImage(apiKey: string, prompt: string, orient
 
 
 // OPENROUTER IMAGE (exploded view only, Master 10-12): one chat call with modalities image+text; the reply carries the picture as a data URL and OpenRouter's own usage.cost,
-// which the usage record keeps as the real cost of the call. google/gemini-3.1-flash-lite-image: about $0.034 and 6 s per image in the 6-subject test.
+// which the usage record keeps as the real cost of the call. flash-image ($0.067, 14 s, 5 of 6 pass the relaxed QA) is attempt 1; flash-lite ($0.034, 6 s, 3 of 6) is the retry.
 export async function openrouterGenerateImage(apiKey: string, model: string, prompt: string): Promise<Tao1ImageResult & { model: string; cost: number | null }> {
   const t0 = Date.now();
   const response = await undiciFetch('https://openrouter.ai/api/v1/chat/completions', {
