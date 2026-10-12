@@ -1330,6 +1330,11 @@ export async function POST(request: Request) {
     if (!caller.ok) {
       return NextResponse.json({ error: 'Atlas generation is limited to three requests every ten minutes. Please try again shortly.' }, { status: 429, headers: { 'Retry-After': String(caller.retryAfterSec) } });
     }
+    const perCallerDay = Number(process.env.ATLAS_CALLER_DAILY_LIMIT ?? 10);
+    const callerDay = await hitLimit({ bucket: 'generate-ip-day', id: clientId(request), limit: Number.isFinite(perCallerDay) && perCallerDay > 0 ? perCallerDay : 10, windowMs: 24 * 60 * 60 * 1000 });
+    if (!callerDay.ok) {
+      return NextResponse.json({ error: 'You have reached the daily limit of new atlas builds from this connection. Saved atlases stay open, and the limit resets within 24 hours.' }, { status: 429, headers: { 'Retry-After': String(callerDay.retryAfterSec) } });
+    }
     const dailyCap = Number(process.env.ATLAS_DAILY_BUILD_LIMIT ?? 60);
     const daily = await hitLimit({ bucket: 'generate-day', id: dayBucket(), limit: Number.isFinite(dailyCap) && dailyCap > 0 ? dailyCap : 60, windowMs: 24 * 60 * 60 * 1000 });
     if (!daily.ok) {
