@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
+import { isBlockedKey, refusedSubject } from '@/app/blocked-atlases';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
 import { chutesGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
@@ -1214,6 +1215,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Prompt must be between 2 and 160 characters.' }, { status: 400 });
   }
   const researchPrompt = canonicalResearchPrompt(prompt);
+  // weapon-class subjects are neither built nor served (app/blocked-atlases.ts)
+  if (refusedSubject(prompt) || isBlockedKey(cacheKeyForPrompt(prompt))) {
+    return NextResponse.json({ error: 'This subject is not available.' }, { status: 422 });
+  }
 
   const cacheOrigin = process.env.ATLAS_CACHE_ORIGIN?.trim();
   if (cacheOrigin) {
