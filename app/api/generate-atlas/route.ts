@@ -1044,7 +1044,8 @@ async function generateImage(
     const lastAttempt = attempt === attempts - 1;
     if (orExploded && connection.openrouterKey) {
       const orPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
-      const generated = await openrouterGenerateImage(connection.openrouterKey, attempt < 1 ? (connection.explodedModel ?? 'google/gemini-3.1-flash-image') : (process.env.ATLAS_EXPLODED_FALLBACK_MODEL?.trim() || 'google/gemini-3.1-flash-lite-image'), orPrompt);
+      const generated = await openrouterGenerateImage(connection.openrouterKey, attempt < 1 ? (connection.explodedModel ?? 'google/gemini-3.1-flash-image') : (process.env.ATLAS_EXPLODED_FALLBACK_MODEL?.trim() || 'google/gemini-3.1-flash-lite-image'), orPrompt).catch((error: unknown) => { console.warn('OpenRouter image call failed', error); return null; });
+      if (!generated) { if (lastAttempt) throw new Error('Exploded view: the image service returned no image.'); continue; }
       recordImage(`image-${mode}`, generated.model, { usage: undefined }, { quality: 'openrouter', provider: 'other', ms: generated.ms, usd: generated.cost ?? undefined });
       try {
         const assessment = await assessGeneratedImage(connection, generated.dataUrl, subject, mode);
