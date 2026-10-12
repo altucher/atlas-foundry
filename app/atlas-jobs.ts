@@ -11,7 +11,7 @@ import { galleryRoot, hasSharedAtlasStore } from '@/app/atlas-store';
 export type UsageLine = { stage: string; model: string; provider: string; calls: number; inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; webSearchCalls: number; images: number; usd: number | null };
 export type JobUsage = {
   /** sums over all builds of the job; usd is null when any line is unpriced (then see unpriced[]; the wallet can price the tokens itself) */
-  totals: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; webSearchCalls: number; images: number; usd: number | null };
+  totals: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; webSearchCalls: number; images: number; usd: number | null; prompt_tokens: number; cached_tokens: number; completion_tokens: number; imageUsd: number };
   unpriced: string[];
   builds: Array<{ buildId: string; phase: string; outcome: string; who: { kind: string; id: string }; usd: number | null; unpriced: string[]; ms: number; lines: UsageLine[] }>;
 };
@@ -107,7 +107,10 @@ export async function usageOfBuilds(buildIds: string[]): Promise<JobUsage> {
   const unpriced = [...new Set([...lines.filter((l) => l.usd === null).map((l) => l.model), ...builds.flatMap((b) => b.unpriced)])];
   return {
     totals: { inputTokens: sum((l) => l.inputTokens), cachedInputTokens: sum((l) => l.cachedInputTokens), outputTokens: sum((l) => l.outputTokens), reasoningTokens: sum((l) => l.reasoningTokens), webSearchCalls: sum((l) => l.webSearchCalls), images: sum((l) => l.images),
-      usd: unpriced.length ? null : Math.round(sum((l) => l.usd ?? 0) * 1e6) / 1e6 },
+      usd: unpriced.length ? null : Math.round(sum((l) => l.usd ?? 0) * 1e6) / 1e6,
+      // per-token billing aliases (additive): completion includes reasoning; cached is a subset of prompt; imageUsd = lines billed per image (no tokens)
+      prompt_tokens: sum((l) => l.inputTokens), cached_tokens: sum((l) => l.cachedInputTokens), completion_tokens: sum((l) => l.outputTokens + l.reasoningTokens),
+      imageUsd: Math.round(sum((l) => (l.images > 0 ? l.usd ?? 0 : 0)) * 1e6) / 1e6 },
     unpriced,
     builds,
   };
