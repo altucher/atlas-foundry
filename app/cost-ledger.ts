@@ -106,7 +106,7 @@ function callUsd(call: Omit<CostCall, 'usd'>): number | null {
   return Math.round(usd * 1e6) / 1e6;
 }
 
-function push(stage: string, model: string, provider: CostCall['provider'], usage: unknown, extra: { webSearchCalls?: number; images?: number; imageSize?: string; imageQuality?: string; ok?: boolean; ms?: number }) {
+function push(stage: string, model: string, provider: CostCall['provider'], usage: unknown, extra: { webSearchCalls?: number; images?: number; imageSize?: string; imageQuality?: string; ok?: boolean; ms?: number; usd?: number }) {
   const ledger = storage.getStore();
   if (!ledger || ledger.calls.length >= 500) return;
   const u = (usage && typeof usage === 'object' ? usage : {}) as Record<string, unknown>;
@@ -123,7 +123,7 @@ function push(stage: string, model: string, provider: CostCall['provider'], usag
     imageSize: extra.imageSize, imageQuality: extra.imageQuality,
     ok: extra.ok ?? true, ms: extra.ms,
   };
-  ledger.calls.push({ ...base, usd: callUsd(base) });
+  ledger.calls.push({ ...base, usd: typeof extra.usd === 'number' ? extra.usd : callUsd(base) });
 }
 
 /** a /responses payload (research, supplier, QA, hotspots) or a TAO-1 chat result shaped like one */
@@ -134,9 +134,9 @@ export function recordResponse(stage: string, model: string, payload: unknown, o
 }
 
 /** an /images/generations payload: one image, plus token usage when the model reports it */
-export function recordImage(stage: string, model: string, payload: unknown, opts: { size?: string; quality?: string; ms?: number; provider?: CostCall['provider'] } = {}) {
+export function recordImage(stage: string, model: string, payload: unknown, opts: { size?: string; quality?: string; ms?: number; provider?: CostCall['provider']; usd?: number } = {}) {
   const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
-  push(stage, model, opts.provider ?? 'openai', p.usage, { images: 1, imageSize: opts.size, imageQuality: opts.quality, ms: opts.ms });
+  push(stage, model, opts.provider ?? 'openai', p.usage, { images: 1, imageSize: opts.size, imageQuality: opts.quality, ms: opts.ms, usd: opts.usd });
 }
 
 function lineKey(call: CostCall) {
