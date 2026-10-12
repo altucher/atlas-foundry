@@ -1235,12 +1235,12 @@ function applyLocatedHotspots(fallback: ReturnType<typeof fallbackHotspots>, loc
 export async function POST(request: Request) {
   const isAdmin = adminAuthorized(request);
   let prompt = '';
-  let phase: 'draft' | 'enrich' = 'draft';
+  let phase: 'draft' | 'enrich' | 'reexplode' = 'draft';
   let recovery = false;
   try {
     const body = (await request.json()) as { prompt?: unknown; phase?: unknown; recovery?: unknown };
     prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
-    phase = body.phase === 'enrich' ? 'enrich' : 'draft';
+    phase = body.phase === 'enrich' ? 'enrich' : body.phase === 'reexplode' ? 'reexplode' : 'draft';
     recovery = body.recovery === true;
   } catch {
     return NextResponse.json({ error: 'Send a JSON body with a prompt.' }, { status: 400 });
@@ -1324,6 +1324,24 @@ export async function POST(request: Request) {
 
   if (phase === 'draft' && !isAdmin && Date.now() < imagesDownUntil) {
     return NextResponse.json({ code: 'CREDITS_EXHAUSTED', error: 'Live generation is paused because the image service has no credits remaining. Saved gallery atlases remain available.' }, { status: 402 });
+  }
+  if (phase === 'reexplode') {
+    // jobs-key or admin only: retry the exploded view of a SAVED atlas that has none (it failed the visual QA at build time); up to 3 attempts, the same strict QA
+    if (!isAdmin && !jobsAuthorized(request)) return NextResponse.json({ error: 'Not authorised.' }, { status: 401 });
+    const saved = cachedAtlas ?? await loadAtlasDraft(promptCacheKey);
+    if (!saved || !subjectMatchesRequest(researchPrompt, saved.subject)) return NextResponse.json({ error: 'No saved atlas to add an exploded view to.' }, { status: 409 });
+    if (saved.explodedImage) return NextResponse.json({ atlas: saved, cached: true, reexploded: false });
+    try {
+      report({ stage: 'render', message: 'Rendering the exploded view again…' });
+      const explodedImage = await generateImage(connection, saved.subject, '', 'exploded', saved.parts, saved.imageOrientation ?? 'landscape', 3);
+      const hotspots = await locateHotspots(connection, explodedImage, saved.parts).catch(() => fallbackHotspots(saved.parts));
+      const save = saved.buildStage === 'complete' ? saveAtlasToGallery : saveAtlasDraft;
+      const atlas = await save({ ...saved, explodedImage, explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${saved.subject}`, hotspots, buildCost: mergeBuildCost(saved.buildCost, summarizeLedger()) }, prompt);
+      report({ stage: 'done', message: 'Exploded view added.' });
+      return NextResponse.json({ atlas, cached: false, reexploded: true });
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message.slice(0, 300) : 'The exploded view could not be rendered.' }, { status: 500 });
+    }
   }
   if (phase === 'enrich') {
     // A finished current atlas needs no paid enrichment: serve it. Otherwise the enrich phase is limited per caller and per atlas.

@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
 type StreamResult = { status: number; payload: Record<string, unknown>; buildId?: string };
 
-async function callPipeline(origin: string, callerAddress: string, subject: string, phase: 'draft' | 'enrich', who: string, onProgress: (stage: string, message: string) => void): Promise<StreamResult> {
+async function callPipeline(origin: string, callerAddress: string, subject: string, phase: 'draft' | 'enrich' | 'reexplode', who: string, onProgress: (stage: string, message: string) => void): Promise<StreamResult> {
   const response = await generateAtlas(new Request(`${origin}/api/generate-atlas`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/x-ndjson', 'x-real-ip': callerAddress, 'x-atlas-jobs-key': process.env.ATLAS_JOBS_KEY ?? '', 'x-atlas-who': who },
@@ -118,6 +118,16 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
       const enrich = await callPipeline(origin, callerAddress, job.subject, 'enrich', who, progress);
       if (enrich.buildId) job.buildIds = [...(job.buildIds ?? []), enrich.buildId];
       if (enrich.status !== 200) job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish: ${String(enrich.payload.error ?? enrich.status).slice(0, 160)}`;
+    }
+    // quality first (founder 10-12): an atlas whose exploded view failed the visual QA gets more rounds (each up to 3 renders) before it is left assembled-only
+    const rounds = Math.max(0, Number(process.env.ATLAS_JOBS_REEXPLODE_ROUNDS ?? 1) || 0);
+    let hasExploded = Boolean((draft.payload.atlas as { explodedImage?: unknown }).explodedImage);
+    for (let round = 0; !hasExploded && round < rounds; round += 1) {
+      await update({ stage: 'render', message: 'Drawing the exploded view' }, true);
+      const again = await callPipeline(origin, callerAddress, job.subject, 'reexplode', who, progress);
+      if (again.buildId) job.buildIds = [...(job.buildIds ?? []), again.buildId];
+      hasExploded = again.status === 200 && Boolean((again.payload.atlas as { explodedImage?: unknown } | undefined)?.explodedImage);
+      if (hasExploded) job.warning = undefined;
     }
     const usage = await usageOfBuilds(job.buildIds ?? []);
     await update({ state: 'done', stage: 'done', message: 'Done', usage, finishedAt: new Date().toISOString() }, true);
