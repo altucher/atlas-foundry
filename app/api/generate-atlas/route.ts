@@ -592,8 +592,11 @@ async function generateResearchInBackground(
 ) {
   if (connection.textProvider === 'tao1' && connection.tao1 && typeof body.input === 'string') {
     report({ stage: progress.stage, message: `${progress.message} (through the TAO-1 API)…` });
-    const payload = await tao1StructuredCall(connection.tao1, body);
-    recordResponse(progress.stage, connection.tao1.model, payload, { provider: 'tao1' });
+    // vendor (supplier) stage on a cheaper TAO-1 model id when ATLAS_TAO1_VENDOR_MODEL is set (e.g. tao-1-fast); research stays on TAO1_MODEL
+    const vendorModel = progress.stage === 'vendor' ? process.env.ATLAS_TAO1_VENDOR_MODEL?.trim() : '';
+    const tao1 = vendorModel ? { ...connection.tao1, model: vendorModel } : connection.tao1;
+    const payload = await tao1StructuredCall(tao1, body);
+    recordResponse(progress.stage, tao1.model, payload, { provider: 'tao1' });
     return payload;
   }
   const headers = { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' };
