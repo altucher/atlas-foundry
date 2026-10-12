@@ -30,7 +30,7 @@ import { trackAnalytics } from './analytics-client';
 const examples = ['data center', 'Falcon 9', 'Tesla', 'espresso machine', 'a male human body'];
 
 function illustratedGalleryItems(items: AtlasGalleryItem[]) {
-  return items.filter((item) => Boolean(item.image?.trim() && item.explodedImage?.trim()));
+  return items.filter((item) => Boolean(item.image?.trim()));
 }
 
 function partLayer(part: AtlasPart) {
@@ -770,7 +770,7 @@ export default function FoundryHome({ embed = false }: { embed?: boolean } = {})
             <button type="button" className="foundry-gallery-card" key={item.cacheKey} title={item.subject} onClick={() => void openGalleryAtlas(item)} disabled={generating}>
               <span className={`gallery-image${item.imageOrientation === 'portrait' ? ' portrait' : ''}`}>
                 <img
-                  src={item.explodedImage}
+                  src={item.explodedImage || item.image}
                   alt={`Exploded ${item.subject} atlas`}
                   loading="lazy"
                   decoding="async"

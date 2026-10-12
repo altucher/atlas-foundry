@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
+import { chutesGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
 
@@ -23,7 +24,6 @@ const defaultDeepResearchModel = 'gpt-5.6-terra';
 const defaultSupplierResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
 const windowMs = 10 * 60 * 1000;
-const maxRequestsPerWindow = 3;
 const supplierRoles = ['manufacturer', 'assembler', 'designer', 'ip-licensor', 'software-provider', 'material-supplier', 'integrator', 'other'] as const;
 const dataCenterDeepLayers = [
   {
@@ -110,6 +110,10 @@ type AiConnection = {
   imageModel: string;
   /** Phase B: text research through the TAO-1 API instead of the OpenAI Responses API (images and image-input calls stay on OpenAI) */
   textProvider?: 'openai' | 'tao1';
+  /** images through TAO-1's media path (Chutes) and image QA / hotspot vision through a TAO-1 vision cell; both default to OpenAI */
+  imageProvider?: 'openai' | 'chutes';
+  chutesKey?: string;
+  visionProvider?: 'openai' | 'tao1';
   tao1?: Tao1Connection;
 };
 
@@ -121,12 +125,20 @@ function directOpenAiModel(model: string) {
   return model.startsWith('openai/') ? model.slice('openai/'.length) : model;
 }
 
-function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1'): AiConnection | null {
+function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', imageOverride?: 'openai' | 'chutes'): AiConnection | null {
   const base = getAiConnectionBase(request);
   if (!base) return null;
   const tao1 = tao1ConnectionFromEnv();
   const wanted = textOverride ?? (process.env.ATLAS_TEXT_PROVIDER?.trim().toLowerCase() === 'tao1' ? 'tao1' : 'openai');
-  return tao1 && wanted === 'tao1' ? { ...base, textProvider: 'tao1', tao1 } : { ...base, textProvider: 'openai' };
+  const imageWanted = imageOverride ?? (process.env.ATLAS_IMAGE_PROVIDER?.trim().toLowerCase() === 'chutes' ? 'chutes' : 'openai');
+  const visionWanted = process.env.ATLAS_VISION_PROVIDER?.trim().toLowerCase() === 'tao1' ? 'tao1' : 'openai';
+  return {
+    ...base, tao1: tao1 ?? undefined,
+    textProvider: tao1 && wanted === 'tao1' ? 'tao1' : 'openai',
+    imageProvider: process.env.CHUTES_API_KEY?.trim() && imageWanted === 'chutes' ? 'chutes' : 'openai',
+    chutesKey: process.env.CHUTES_API_KEY?.trim() || undefined,
+    visionProvider: tao1 && visionWanted === 'tao1' ? 'tao1' : 'openai',
+  };
 }
 
 function getAiConnectionBase(request: Request): AiConnection | null {
@@ -973,6 +985,13 @@ async function deepenFalconNineArchive(
   return saved;
 }
 
+function explodedAttemptsFor(request: Request, isAdmin: boolean) {
+  const asked = isAdmin ? Number(request.headers.get('x-atlas-exploded-attempts')) : NaN;
+  const base = Number(process.env.ATLAS_EXPLODED_ATTEMPTS);
+  const n = Number.isFinite(asked) && asked >= 1 ? asked : Number.isFinite(base) && base >= 1 ? base : 1;
+  return Math.min(3, Math.floor(n));
+}
+
 async function generateImage(
   connection: AiConnection,
   subject: string,
@@ -980,6 +999,7 @@ async function generateImage(
   mode: 'assembled' | 'exploded',
   parts: AtlasPart[],
   imageOrientation: FoundryAtlas['imageOrientation'],
+  explodedAttempts = 1,
 ) {
   const componentList = parts.map((part, index) => `${index + 1}. ${part.name} (${part.system})`).join('\n');
   const formatDirection = imageOrientation === 'portrait'
@@ -991,7 +1011,34 @@ async function generateImage(
     : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. CRITICAL COMPOSITION RULE: depict the parts from exactly one product, with the product fully disassembled. There must be ZERO intact or usable assembled copies of the product anywhere in the image. Do not add a reference product, second product, comparison view, inset, duplicated display/screen, or side-by-side assembled object. Separate the outer shell, display or cover, input surfaces, internal boards, battery or power system, structural pieces, and connectors so no combination still reads as an intact product. Distribute the components broadly and evenly across the useful canvas; do not gather them into a central pile. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
 
   let retryDirection = '';
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  // Chutes exploded views are strict (Master 10-12): live clicks make 1 attempt (a person is waiting); prebuild/background builds (admin header x-atlas-exploded-attempts, 1-3) retry, the QA must pass, and an exploded image that never passes is left out (the atlas then shows the inventory view)
+  const strictExploded = mode === 'exploded' && connection.imageProvider === 'chutes';
+  const attempts = connection.imageProvider === 'chutes' ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const lastAttempt = attempt === attempts - 1;
+    if (connection.imageProvider === 'chutes' && connection.chutesKey) {
+      // Chutes (qwen-image-2512, z-image-turbo fallback) called directly (interim; the TAO-1 images endpoint replaces this): same prompts, same QA and retry as the OpenAI path below
+      const chutesDirection = mode === 'exploded' ? ' STYLE: an exploded technical diagram on one clean studio backdrop: every part separated along its assembly axes with generous spacing, nothing left assembled, and no complete intact product anywhere in the frame.' : '';
+      // Exploded views use a short technical-illustration prompt (the long museum-studio prompt made the chutes draw the intact product plus a few loose parts)
+      const chutesPrompt = mode === 'exploded'
+        ? `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere, no text, no labels. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`
+        : `${sharedDirection} ${modeDirection}${chutesDirection}${retryDirection}`;
+      const generated = await chutesGenerateImage(connection.chutesKey, chutesPrompt, imageOrientation === 'portrait' ? 'portrait' : 'landscape');
+      recordImage(`image-${mode}`, generated.model, { usage: undefined }, { size: generated.width && generated.height ? `${generated.width}x${generated.height}` : undefined, quality: 'chutes', provider: 'other', ms: generated.ms });
+      const image = generated.dataUrl;
+      try {
+        const assessment = await assessGeneratedImage(connection, image, subject, mode);
+        if (assessment.pass || (lastAttempt && !strictExploded)) return image;
+        if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${assessment.issues.join(' ').slice(0, 200)}`);
+        retryDirection = `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${assessment.issues.join(' ')} Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.`;
+      } catch (error) {
+        if (strictExploded && /did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
+        console.warn('Image composition QA unavailable', error);
+        if (strictExploded) { if (lastAttempt) throw new Error('Exploded view could not be checked by visual QA.'); continue; }
+        return image;
+      }
+      continue;
+    }
     const response = await undiciFetch(`${connection.baseUrl}/images/generations`, {
       dispatcher: aiDispatcher,
       method: 'POST',
@@ -1049,6 +1096,15 @@ async function assessGeneratedImage(
   const passRule = mode === 'assembled'
     ? 'Pass only when exactly one intact subject is shown, it is fully visible, it occupies most of the useful frame, and there is no second copy, exploded arrangement, inset, or excessive empty border.'
     : 'Pass only when zero intact assembled products are shown, no major assembly such as a display is duplicated, the visible pieces all belong to one disassembled subject, components are distinct and non-overlapping, and they are distributed across the useful frame rather than piled at its center.';
+  const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a reference copy merely because other parts are exploded.`
+  if (connection.visionProvider === 'tao1' && connection.tao1) {
+    const r = await tao1VisionText(connection.tao1, `${qaInstructions}\nReply with ONE JSON object and nothing else: {"pass": boolean, "issues": [short strings, at most 8]}.`, 'Inspect this image.', image, 1500);
+    recordResponse('image-qa', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
+    const m = /\{[\s\S]*\}/.exec(r.text);
+    const parsed = m ? JSON.parse(m[0]) as { pass?: boolean; issues?: string[] } : null;
+    if (!parsed || typeof parsed.pass !== 'boolean') throw new Error('Image QA reply was not usable.');
+    return { pass: parsed.pass, issues: Array.isArray(parsed.issues) ? parsed.issues.map(String).slice(0, 8) : [] };
+  }
   const response = await undiciFetch(`${connection.baseUrl}/responses`, {
     dispatcher: aiDispatcher,
     method: 'POST',
@@ -1056,7 +1112,7 @@ async function assessGeneratedImage(
     body: JSON.stringify({
       model: connection.draftModel,
       reasoning: { effort: 'low' },
-      instructions: `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a reference copy merely because other parts are exploded.`,
+      instructions: qaInstructions,
       input: [{ role: 'user', content: [{ type: 'input_image', image_url: image, detail: 'high' }] }],
       text: { format: { type: 'json_schema', name: 'atlas_image_quality', strict: true, schema } },
     }),
@@ -1094,13 +1150,21 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
     },
   } as const;
   const partList = parts.map((part) => `${part.id}: ${part.name}`).join('\n');
+  const hotspotInstructions = 'Locate components in an exploded-view product image. Return a tight clickable bounding rectangle for each requested component cluster. Express its center as x/y percentages and its size as width/height percentages of the full image, measured from the top-left corner. Use every exact id once. If several adjacent pieces form one system, enclose that cluster. Do not include unrelated neighboring parts.'
+  if (connection.visionProvider === 'tao1' && connection.tao1) {
+    const r = await tao1VisionText(connection.tao1, `${hotspotInstructions}\nReply with ONE JSON object and nothing else: {"hotspots":[{"id": string, "x": number 0-100, "y": number 0-100, "width": number 1-100, "height": number 1-100}]} with one entry for every requested id.`, `Locate these components:\n${partList}`, explodedImage, 6000);
+    recordResponse('hotspots', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
+    const m = /\{[\s\S]*\}/.exec(r.text);
+    if (!m) throw new Error('Hotspot reply was not usable.');
+    return applyLocatedHotspots(fallback, JSON.parse(m[0]) as { hotspots?: Array<AtlasHotspot & { id: string }> }, parts);
+  }
   const response = await undiciFetch(`${connection.baseUrl}/responses`, {
     dispatcher: aiDispatcher,
     method: 'POST',
     headers: { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: connection.researchModel,
-      instructions: 'Locate components in an exploded-view product image. Return a tight clickable bounding rectangle for each requested component cluster. Express its center as x/y percentages and its size as width/height percentages of the full image, measured from the top-left corner. Use every exact id once. If several adjacent pieces form one system, enclose that cluster. Do not include unrelated neighboring parts.',
+      instructions: hotspotInstructions,
       input: [{
         role: 'user',
         content: [
@@ -1114,7 +1178,10 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
   if (!response.ok) throw new Error(`Hotspot mapping failed (${response.status}).`);
   const payload = (await response.json()) as Record<string, unknown>;
   recordResponse('hotspots', connection.researchModel, payload);
-  const located = JSON.parse(extractOutputText(payload)) as { hotspots?: Array<AtlasHotspot & { id: string }> };
+  return applyLocatedHotspots(fallback, JSON.parse(extractOutputText(payload)) as { hotspots?: Array<AtlasHotspot & { id: string }> }, parts);
+}
+
+function applyLocatedHotspots(fallback: ReturnType<typeof fallbackHotspots>, located: { hotspots?: Array<AtlasHotspot & { id: string }> }, parts: AtlasPart[]) {
   const knownIds = new Set(parts.map((part) => part.id));
   for (const hotspot of located.hotspots ?? []) {
     if (!knownIds.has(hotspot.id) || !Number.isFinite(hotspot.x) || !Number.isFinite(hotspot.y) || !Number.isFinite(hotspot.width) || !Number.isFinite(hotspot.height)) continue;
@@ -1207,7 +1274,8 @@ export async function POST(request: Request) {
   }
 
   const textOverride = isAdmin && request.headers.get('x-atlas-text-provider') === 'tao1' ? 'tao1' : isAdmin && request.headers.get('x-atlas-text-provider') === 'openai' ? 'openai' : undefined;
-  const connection = getAiConnection(request, textOverride);
+  const imageOverride = isAdmin && request.headers.get('x-atlas-image-provider') === 'chutes' ? 'chutes' : isAdmin && request.headers.get('x-atlas-image-provider') === 'openai' ? 'openai' : undefined;
+  const connection = getAiConnection(request, textOverride, imageOverride);
   if (!connection) {
     return NextResponse.json(
       { code: 'NOT_CONFIGURED', error: 'Live atlas generation is not configured on this deployment.' },
@@ -1276,14 +1344,28 @@ export async function POST(request: Request) {
   }
 
   if (!isAdmin) {
-    const caller = await hitLimit({ bucket: 'generate-ip', id: clientId(request), limit: maxRequestsPerWindow, windowMs });
-    if (!caller.ok) {
-      return NextResponse.json({ error: 'Atlas generation is limited to three requests every ten minutes. Please try again shortly.' }, { status: 429, headers: { 'Retry-After': String(caller.retryAfterSec) } });
+    // FOUNDER 10-12: "do not limit the number of explodes at all". No daily caps unless ATLAS_DAILY_BUILD_LIMIT / ATLAS_CALLER_DAILY_LIMIT are set (unset = unlimited). The one limit that stays
+    // by default is an anti-bot burst per connection address (ATLAS_BURST_LIMIT builds per 10 minutes, default 10; 0 turns it off).
+    const burst = Number(process.env.ATLAS_BURST_LIMIT ?? 10);
+    if (Number.isFinite(burst) && burst > 0) {
+      const caller = await hitLimit({ bucket: 'generate-ip', id: clientId(request), limit: burst, windowMs });
+      if (!caller.ok) {
+        return NextResponse.json({ error: 'That is a lot of new atlases in a short time. Please wait a few minutes and try again; saved atlases open instantly.' }, { status: 429, headers: { 'Retry-After': String(caller.retryAfterSec) } });
+      }
     }
-    const dailyCap = Number(process.env.ATLAS_DAILY_BUILD_LIMIT ?? 60);
-    const daily = await hitLimit({ bucket: 'generate-day', id: dayBucket(), limit: Number.isFinite(dailyCap) && dailyCap > 0 ? dailyCap : 60, windowMs: 24 * 60 * 60 * 1000 });
-    if (!daily.ok) {
-      return NextResponse.json({ error: 'New atlas builds are paused for today because the daily build budget was reached. Saved atlases are still available.' }, { status: 429, headers: { 'Retry-After': String(daily.retryAfterSec) } });
+    const perCallerDay = Number(process.env.ATLAS_CALLER_DAILY_LIMIT);
+    if (Number.isFinite(perCallerDay) && perCallerDay > 0) {
+      const callerDay = await hitLimit({ bucket: 'generate-ip-day', id: clientId(request), limit: perCallerDay, windowMs: 24 * 60 * 60 * 1000 });
+      if (!callerDay.ok) {
+        return NextResponse.json({ error: 'You have reached the daily limit of new atlas builds from this connection. Saved atlases stay open.' }, { status: 429, headers: { 'Retry-After': String(callerDay.retryAfterSec) } });
+      }
+    }
+    const dailyCap = Number(process.env.ATLAS_DAILY_BUILD_LIMIT);
+    if (Number.isFinite(dailyCap) && dailyCap > 0) {
+      const daily = await hitLimit({ bucket: 'generate-day', id: dayBucket(), limit: dailyCap, windowMs: 24 * 60 * 60 * 1000 });
+      if (!daily.ok) {
+        return NextResponse.json({ error: 'New atlas builds are paused for today because the daily build budget was reached. Saved atlases are still available.' }, { status: 429, headers: { 'Retry-After': String(daily.retryAfterSec) } });
+      }
     }
   }
 
@@ -1367,7 +1449,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     const imageResults = await Promise.allSettled([
       generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
         .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation)
+      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin))
         .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
     ]);
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
@@ -1405,7 +1487,9 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     try {
       // A half-finished build is never saved as if it were whole: the saved gallery needs the matched image pair. Without both images the draft is shown to this
       // visitor only (an admin test may keep a text-only draft with X-Atlas-Allow-Text-Only: 1). The build's usage is still recorded either way.
-      if ((!image || !explodedImage) && !(isAdmin && request.headers.get('x-atlas-allow-text-only') === '1')) {
+      // Chutes interim: an assembled image alone is saved (inventory view) when no exploded image passed the strict QA
+      const needExploded = connection.imageProvider !== 'chutes';
+      if ((!image || (needExploded && !explodedImage)) && !(isAdmin && request.headers.get('x-atlas-allow-text-only') === '1')) {
         cacheWarning = 'The first draft is ready, but it was not saved to the shared gallery because the matched image pair could not be generated.';
         noteLedger('draft_not_saved_no_images');
         report({ stage: 'done', message: 'First draft ready; it was not saved because the images were unavailable.' });
