@@ -24,7 +24,6 @@ const defaultDeepResearchModel = 'gpt-5.6-terra';
 const defaultSupplierResearchModel = 'gpt-6-astra';
 const defaultImageModel = 'gpt-image-2.5-flare';
 const windowMs = 10 * 60 * 1000;
-const maxRequestsPerWindow = 3;
 const supplierRoles = ['manufacturer', 'assembler', 'designer', 'ip-licensor', 'software-provider', 'material-supplier', 'integrator', 'other'] as const;
 const dataCenterDeepLayers = [
   {
@@ -1326,19 +1325,28 @@ export async function POST(request: Request) {
   }
 
   if (!isAdmin) {
-    const caller = await hitLimit({ bucket: 'generate-ip', id: clientId(request), limit: maxRequestsPerWindow, windowMs });
-    if (!caller.ok) {
-      return NextResponse.json({ error: 'Atlas generation is limited to three requests every ten minutes. Please try again shortly.' }, { status: 429, headers: { 'Retry-After': String(caller.retryAfterSec) } });
+    // FOUNDER 10-12: "do not limit the number of explodes at all". No daily caps unless ATLAS_DAILY_BUILD_LIMIT / ATLAS_CALLER_DAILY_LIMIT are set (unset = unlimited). The one limit that stays
+    // by default is an anti-bot burst per connection address (ATLAS_BURST_LIMIT builds per 10 minutes, default 10; 0 turns it off).
+    const burst = Number(process.env.ATLAS_BURST_LIMIT ?? 10);
+    if (Number.isFinite(burst) && burst > 0) {
+      const caller = await hitLimit({ bucket: 'generate-ip', id: clientId(request), limit: burst, windowMs });
+      if (!caller.ok) {
+        return NextResponse.json({ error: 'That is a lot of new atlases in a short time. Please wait a few minutes and try again; saved atlases open instantly.' }, { status: 429, headers: { 'Retry-After': String(caller.retryAfterSec) } });
+      }
     }
-    const perCallerDay = Number(process.env.ATLAS_CALLER_DAILY_LIMIT ?? 10);
-    const callerDay = await hitLimit({ bucket: 'generate-ip-day', id: clientId(request), limit: Number.isFinite(perCallerDay) && perCallerDay > 0 ? perCallerDay : 10, windowMs: 24 * 60 * 60 * 1000 });
-    if (!callerDay.ok) {
-      return NextResponse.json({ error: 'You have reached the daily limit of new atlas builds from this connection. Saved atlases stay open, and the limit resets within 24 hours.' }, { status: 429, headers: { 'Retry-After': String(callerDay.retryAfterSec) } });
+    const perCallerDay = Number(process.env.ATLAS_CALLER_DAILY_LIMIT);
+    if (Number.isFinite(perCallerDay) && perCallerDay > 0) {
+      const callerDay = await hitLimit({ bucket: 'generate-ip-day', id: clientId(request), limit: perCallerDay, windowMs: 24 * 60 * 60 * 1000 });
+      if (!callerDay.ok) {
+        return NextResponse.json({ error: 'You have reached the daily limit of new atlas builds from this connection. Saved atlases stay open.' }, { status: 429, headers: { 'Retry-After': String(callerDay.retryAfterSec) } });
+      }
     }
-    const dailyCap = Number(process.env.ATLAS_DAILY_BUILD_LIMIT ?? 60);
-    const daily = await hitLimit({ bucket: 'generate-day', id: dayBucket(), limit: Number.isFinite(dailyCap) && dailyCap > 0 ? dailyCap : 60, windowMs: 24 * 60 * 60 * 1000 });
-    if (!daily.ok) {
-      return NextResponse.json({ error: 'New atlas builds are paused for today because the daily build budget was reached. Saved atlases are still available.' }, { status: 429, headers: { 'Retry-After': String(daily.retryAfterSec) } });
+    const dailyCap = Number(process.env.ATLAS_DAILY_BUILD_LIMIT);
+    if (Number.isFinite(dailyCap) && dailyCap > 0) {
+      const daily = await hitLimit({ bucket: 'generate-day', id: dayBucket(), limit: dailyCap, windowMs: 24 * 60 * 60 * 1000 });
+      if (!daily.ok) {
+        return NextResponse.json({ error: 'New atlas builds are paused for today because the daily build budget was reached. Saved atlases are still available.' }, { status: 429, headers: { 'Retry-After': String(daily.retryAfterSec) } });
+      }
     }
   }
 

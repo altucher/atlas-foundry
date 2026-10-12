@@ -86,13 +86,20 @@ export async function chutesGenerateImage(apiKey: string, prompt: string, orient
   const sized = orientation === 'portrait' ? { width: 1024, height: 1536 } : { width: 1536, height: 1024 };
   const errors: string[] = [];
   for (const chute of CHUTES_IMAGE) {
-    for (const body of [{ prompt, ...sized }, { prompt }]) {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+    // z-image-turbo refuses long prompts (400 above a few hundred characters): it gets the opening of the prompt
+    const text = chute.label.includes('z-image') ? prompt.slice(0, 700) : prompt;
+    for (const body of [{ prompt: text, ...sized }, { prompt: text }]) {
+      for (let attempt = 0; attempt < 4; attempt += 1) {
         let response;
         try {
           response = await undiciFetch(chute.url, { dispatcher, method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         } catch (error) { errors.push(`${chute.label}: ${error instanceof Error ? error.message : 'request failed'}`); break; }
-        if ((response.status === 502 || response.status === 503) && attempt < 2) { await new Promise((resolve) => setTimeout(resolve, 8000)); continue; }
+        // 502/503, 429 (busy) and a 500 "No infrastructure available" (cold or full chute) are transient: wait and retry
+        if ([429, 500, 502, 503].includes(response.status) && attempt < 3) {
+          const peek = response.status === 500 ? (await response.text().catch(() => '')) : '';
+          if (response.status !== 500 || /No infrastructure|unavailable|overloaded/i.test(peek)) { await new Promise((resolve) => setTimeout(resolve, 10_000 * (attempt + 1))); continue; }
+          errors.push(`${chute.label}: HTTP 500 ${peek.replace(/\s+/g, ' ').slice(0, 120)}`); break;
+        }
         if (!response.ok) {
           const detail = (await response.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 160);
           errors.push(`${chute.label}: HTTP ${response.status}${detail ? ` ${detail}` : ''}`);
