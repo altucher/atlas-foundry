@@ -1010,6 +1010,13 @@ function explodedAttemptsFor(request: Request, isAdmin: boolean, fallbackAttempt
   return Math.min(3, Math.floor(n));
 }
 
+/** Retry direction after a failed visual QA. Quoting a lettering issue back to an image model makes it draw the same words again, so a lettering failure asks for a diagram with no text at all. */
+function correctionFor(issues: string[], composition: string) {
+  const lettering = issues.some((issue) => /label|text|letter|spell|word|caption|gibberish|garbled|illegible/i.test(issue));
+  const rest = issues.filter((issue) => !/label|text|letter|spell|word|caption|gibberish|garbled|illegible|callout/i.test(issue)).join(' ');
+  return `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${lettering ? 'It contained unreadable or misspelled lettering. Draw ABSOLUTELY NO TEXT: no labels, no captions, no callouts, no map lettering, no numbers, no letters, no logos; every part is a plain unlabeled shape. ' : ''}${rest} ${composition}`;
+}
+
 async function generateImage(
   connection: AiConnection,
   subject: string,
@@ -1043,7 +1050,7 @@ async function generateImage(
         const assessment = await assessGeneratedImage(connection, generated.dataUrl, subject, mode);
         if (assessment.pass) return generated.dataUrl;
         if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${assessment.issues.join(' ').slice(0, 200)}`);
-        retryDirection = `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${assessment.issues.join(' ')} Recompose from scratch with no intact product anywhere in the frame.`;
+        retryDirection = correctionFor(assessment.issues, 'Recompose from scratch with no intact product anywhere in the frame.');
       } catch (error) {
         if (/did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
         console.warn('Image composition QA unavailable', error);
@@ -1065,7 +1072,7 @@ async function generateImage(
         const assessment = await assessGeneratedImage(connection, image, subject, mode);
         if (assessment.pass || (lastAttempt && !strictExploded)) return image;
         if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${assessment.issues.join(' ').slice(0, 200)}`);
-        retryDirection = `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${assessment.issues.join(' ')} Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.`;
+        retryDirection = correctionFor(assessment.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
       } catch (error) {
         if (strictExploded && /did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
         console.warn('Image composition QA unavailable', error);
