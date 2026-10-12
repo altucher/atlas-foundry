@@ -146,6 +146,17 @@ function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', ima
   };
 }
 
+/** the model labels the response reports: the models that really ran (TAO-1 for research and vision, Chutes/OpenRouter for pictures) instead of the unused OpenAI defaults */
+function reportedModels(connection: AiConnection, deep = false) {
+  const tao1Text = connection.textProvider === 'tao1' && connection.tao1 ? connection.tao1.model : null;
+  const image = connection.imageProvider === 'chutes' ? 'chutes/qwen-image-2512' : connection.imageModel;
+  return {
+    researchModel: tao1Text ?? (deep ? connection.deepResearchModel : connection.draftModel),
+    supplierResearchModel: tao1Text ?? connection.supplierResearchModel,
+    imageModel: connection.openrouterKey ? `${image} + ${connection.explodedModel ?? 'google/gemini-3.1-flash-image'}` : image,
+  };
+}
+
 function getAiConnectionBase(request: Request): AiConnection | null {
   const configuredDraftModel = process.env.OPENAI_DRAFT_MODEL ?? defaultDraftModel;
   const configuredResearchModel = process.env.OPENAI_RESEARCH_MODEL ?? defaultResearchModel;
@@ -1357,7 +1368,7 @@ export async function POST(request: Request) {
         atlas,
         cached: false,
         enriched: true,
-        supplierResearchModel: connection.supplierResearchModel,
+        supplierResearchModel: reportedModels(connection).supplierResearchModel,
       });
     } catch (error) {
       console.error('Background supplier enrichment failed', error);
@@ -1404,9 +1415,8 @@ export async function POST(request: Request) {
         atlas,
         cached: false,
         deepened: true,
-        researchModel: connection.deepResearchModel,
-        supplierResearchModel: deepBuildKey === 'data-center' ? connection.deepResearchModel : connection.supplierResearchModel,
-        imageModel: connection.imageModel,
+        ...reportedModels(connection, true),
+        ...(deepBuildKey === 'data-center' && connection.textProvider !== 'tao1' ? { supplierResearchModel: connection.deepResearchModel } : {}),
       });
     } catch (error) {
       console.error(`${deepBuildKey} archive deepening failed`, error);
@@ -1532,9 +1542,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       enrichmentPending: !cacheWarning,
       imageWarning,
       cacheWarning,
-      researchModel: connection.draftModel,
-      supplierResearchModel: connection.supplierResearchModel,
-      imageModel: connection.imageModel,
+      ...reportedModels(connection),
     });
   } catch (error) {
     console.error('Atlas generation failed', error);
