@@ -6,6 +6,7 @@ import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard'
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
 import { sanitizeSupplierResult } from '@/app/supplier-sanitize';
+import { pickExploded } from '@/app/exploded-merge';
 import { escalateWarm, fallbackConfigured, isCapacityError, liveHasFreeWorker, loraEndpointUsable, primaryRunpodOn, runpodBaseImage } from '@/app/image-fallback';
 import { trimSupplierSchema, VENDOR_OUTPUT_BUDGET } from '@/app/vendor-trim';
 import { auditLooksEmpty, mergeAudits, supplierCount, unsourcedShare, vendorPinStore } from '@/app/vendor-fallback';
@@ -1581,8 +1582,10 @@ export async function POST(request: Request) {
       const suppliersUnavailable = supplierCount(enriched.parts) < 3;
       report({ stage: 'save', message: 'Publishing the completed supplier and IP edition to the shared gallery…' });
       // an exploded view rendered in parallel (LoRA pass) is saved to the draft record: keep it
+      // the exploded step may have saved to the draft record OR to the gallery record: take it from either (app/exploded-merge.ts)
       const latestDraft = await loadAtlasDraft(promptCacheKey).catch(() => null);
-      const keepExploded = !draft.explodedImage && latestDraft?.explodedImage ? { explodedImage: latestDraft.explodedImage, explodedImageAlt: latestDraft.explodedImageAlt, hotspots: latestDraft.hotspots } : {};
+      const latestGallery = await loadCachedAtlas(promptCacheKey).catch(() => null);
+      const keepExploded = pickExploded(draft, latestGallery, latestDraft) as { explodedImage?: string; explodedImageAlt?: string; hotspots?: typeof mappedHotspots };
       const atlas = await saveAtlasToGallery({
         ...draft,
         ...keepExploded,
@@ -1593,7 +1596,7 @@ export async function POST(request: Request) {
         accuracyNote: enriched.accuracyNote,
         parts: enriched.parts,
         sources: enriched.sources,
-        hotspots: mappedHotspots ?? (keepExploded as { hotspots?: typeof mappedHotspots }).hotspots,
+        hotspots: mappedHotspots ?? keepExploded.hotspots,
         buildStage: 'complete',
         generatedAt: new Date().toISOString(),
         buildCost: mergeBuildCost(draft.buildCost, summarizeLedger()),
