@@ -126,30 +126,32 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
       return;
     }
     await update({ state: 'draft_ready', atlasKey: job.id, stage: 'draft', message: 'Ready to open; finding the suppliers', warning: typeof draft.payload.imageWarning === 'string' ? draft.payload.imageWarning.slice(0, 300) : undefined }, true);
-    if (draft.payload.enrichmentPending) {
+    // The suppliers pass and the exploded-view pass run IN PARALLEL (the LoRA endpoint's cold start of minutes overlaps the supplier research); both merge into the freshest saved copy.
+    const rounds = Math.max(0, Number(process.env.ATLAS_JOBS_REEXPLODE_ROUNDS ?? 1) || 0);
+    let hasExploded = Boolean((draft.payload.atlas as { explodedImage?: unknown }).explodedImage);
+    const runEnrich = async () => {
+      if (!draft.payload.enrichmentPending) return;
       await update({ state: 'enriching', stage: 'vendor', message: 'Finding the suppliers' }, true);
       const enrichRun = capAt - Date.now() < 90_000 ? TIMED_OUT : await within(callPipeline(origin, callerAddress, job.subject, 'enrich', who, progress));
       if (enrichRun === TIMED_OUT) {
         job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish in time; the atlas is ready without it.`;
-      } else {
-      const enrich = enrichRun;
-      if (enrich.buildId) job.buildIds = [...(job.buildIds ?? []), enrich.buildId];
-      if (enrich.status !== 200) job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish: ${String(enrich.payload.error ?? enrich.status).slice(0, 160)}`;
+        return;
       }
-    }
-    // quality first (founder 10-12): an atlas whose exploded view failed the visual QA gets more rounds (each up to 3 renders) before it is left assembled-only
-    const rounds = Math.max(0, Number(process.env.ATLAS_JOBS_REEXPLODE_ROUNDS ?? 1) || 0);
-    let hasExploded = Boolean((draft.payload.atlas as { explodedImage?: unknown }).explodedImage);
-    for (let round = 0; !hasExploded && round < rounds; round += 1) {
-      await update({ stage: 'render', message: 'Drawing the exploded view' }, true);
-      if (capAt - Date.now() < 150_000) break;
-      const againRun = await within(callPipeline(origin, callerAddress, job.subject, 'reexplode', who, progress));
-      if (againRun === TIMED_OUT) break;
-      const again = againRun;
-      if (again.buildId) job.buildIds = [...(job.buildIds ?? []), again.buildId];
-      hasExploded = again.status === 200 && Boolean((again.payload.atlas as { explodedImage?: unknown } | undefined)?.explodedImage);
-      if (hasExploded) job.warning = undefined;
-    }
+      if (enrichRun.buildId) job.buildIds = [...(job.buildIds ?? []), enrichRun.buildId];
+      if (enrichRun.status !== 200) job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish: ${String(enrichRun.payload.error ?? enrichRun.status).slice(0, 160)}`;
+    };
+    // quality first (founder 10-12): an atlas without an exploded view gets more rounds (each up to ATLAS_LORA_ATTEMPTS / 3 renders) before it is left assembled-only
+    const runExploded = async () => {
+      for (let round = 0; !hasExploded && round < rounds; round += 1) {
+        if (capAt - Date.now() < 150_000) break;
+        const againRun = await within(callPipeline(origin, callerAddress, job.subject, 'reexplode', who, progress));
+        if (againRun === TIMED_OUT) break;
+        if (againRun.buildId) job.buildIds = [...(job.buildIds ?? []), againRun.buildId];
+        hasExploded = againRun.status === 200 && Boolean((againRun.payload.atlas as { explodedImage?: unknown } | undefined)?.explodedImage);
+        if (hasExploded) job.warning = job.warning?.replace(/Exploded image:[^.]*\.?\s*/i, '').trim() || undefined;
+      }
+    };
+    await Promise.all([runEnrich(), runExploded()]);
     const usage = await usageOfBuilds(job.buildIds ?? [], { explodedDelivered: hasExploded });
     await update({ state: 'done', stage: 'done', message: 'Done', usage, finishedAt: new Date().toISOString() }, true);
   } catch (error) {

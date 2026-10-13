@@ -141,3 +141,59 @@ export async function openrouterGenerateImage(apiKey: string, model: string, pro
   const cost = typeof payload.usage?.cost === 'number' ? payload.usage.cost : null;
   return { model, cost, dataUrl: url, mime: m[1], bytes: buf.length, ms: Date.now() - t0, sourceUrl: 'openrouter', usage: payload.usage ?? null, width: size?.w ?? null, height: size?.h ?? null };
 }
+
+
+// LORA EXPLODED VIEW (open-weight only): Qwen-Image-2512 + our exploded-view LoRA (+ Apache Lightning 8-step) on a RunPod serverless endpoint that scales to zero (handler jai_state/atlas_phase_a/lora/serve/handler_lora.py).
+// POST /run, poll /status (a cold worker can take minutes: this is why the exploded view is rendered after the atlas is ready). Cost = billed execution seconds x ATLAS_LORA_USD_PER_SEC.
+export async function loraGenerateImage(endpoint: string, apiKey: string, prompt: string): Promise<Tao1ImageResult & { model: string; cost: number | null }> {
+  const t0 = Date.now();
+  const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+  const submit = await undiciFetch(`https://api.runpod.ai/v2/${encodeURIComponent(endpoint)}/run`, { dispatcher, method: 'POST', headers, body: JSON.stringify({ input: { prompt, width: 1280, height: 864 } }) });
+  if (!submit.ok) throw new Error(`LoRA submit failed (${submit.status}).`);
+  const job = await submit.json() as { id?: string };
+  if (!job.id) throw new Error('LoRA submit returned no job id.');
+  const deadline = t0 + 9 * 60 * 1000;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    if (Date.now() > deadline) throw new Error('LoRA job timed out.');
+    const poll = await undiciFetch(`https://api.runpod.ai/v2/${encodeURIComponent(endpoint)}/status/${job.id}`, { dispatcher, headers });
+    if (!poll.ok) continue;
+    const status = await poll.json() as { status?: string; executionTime?: number; output?: { image_b64?: string }; error?: string };
+    if (status.status === 'FAILED' || status.status === 'CANCELLED' || status.status === 'TIMED_OUT') throw new Error(`LoRA job ${status.status}.`);
+    if (status.status !== 'COMPLETED') continue;
+    const b64 = status.output?.image_b64;
+    if (!b64) throw new Error('LoRA job returned no image.');
+    const buf = Buffer.from(b64, 'base64');
+    const size = imageSize(buf);
+    const perSecond = Number(process.env.ATLAS_LORA_USD_PER_SEC) || 0.00076;
+    return { model: 'tencent/LoRAImage-3.0-Instruct-Distil', cost: typeof status.executionTime === 'number' ? Math.round(status.executionTime / 1000 * perSecond * 1e6) / 1e6 : null, dataUrl: `data:image/png;base64,${b64}`, mime: 'image/png', bytes: buf.length, ms: Date.now() - t0, sourceUrl: 'runpod', usage: null, width: size?.w ?? null, height: size?.h ?? null };
+  }
+}
+
+// TEXT REMOVAL (open-weight): Qwen-Image-Edit-2511 on Chutes redraws the same picture without any lettering, so a person never sees garbled pseudo-text (the atlas draws its own labels from the hotspot map)
+export async function chutesRemoveText(apiKey: string, imageDataUrl: string): Promise<Tao1ImageResult & { model: string }> {
+  const t0 = Date.now();
+  const m = /^data:(image\/(?:png|jpeg|webp));base64,([\s\S]*)$/.exec(imageDataUrl);
+  if (!m) throw new Error('Not an image data URL.');
+  const size = imageSize(Buffer.from(m[2], 'base64'));
+  const body: Record<string, unknown> = { prompt: 'Remove every piece of text, lettering, labels, numbers and captions from this image. Keep everything else exactly the same: the same shapes, colors, positions and white background.', image_b64s: [m[2]] };
+  if (size) { body.width = Math.floor(size.w / 16) * 16; body.height = Math.floor(size.h / 16) * 16; }
+  let lastError = 'no reply';
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await undiciFetch('https://vonkaiser-qwen-image-edit-2511.chutes.ai/generate', { dispatcher, method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (response.ok) {
+      const buf = Buffer.from(await response.arrayBuffer());
+      const mime = (response.headers.get('content-type') ?? 'image/png').split(';')[0];
+      if (buf.length > 1000 && /^image\/(png|jpeg|webp)$/.test(mime)) {
+        const out = imageSize(buf);
+        return { model: 'chutes/qwen-image-edit-2511', dataUrl: `data:${mime};base64,${buf.toString('base64')}`, mime, bytes: buf.length, ms: Date.now() - t0, sourceUrl: 'chutes-edit', usage: null, width: out?.w ?? null, height: out?.h ?? null };
+      }
+      lastError = 'empty reply';
+    } else {
+      lastError = `HTTP ${response.status}`;
+      if (![429, 500, 502, 503].includes(response.status)) break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 8000 * (attempt + 1)));
+  }
+  throw new Error(`Text removal failed (${lastError}).`);
+}

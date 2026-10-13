@@ -5,11 +5,11 @@ import { isBlockedKey, refusedSubject } from '@/app/blocked-atlases';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
-import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText } from '@/app/tao1-image';
+import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText, loraGenerateImage, chutesRemoveText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho, ledgerElapsedMs } from '@/app/cost-ledger';
 
-import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
+import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery, loadGalleryAtlas } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
 import { canonicalResearchPrompt, subjectMatchesRequest } from '@/app/subject-identity';
 
@@ -118,6 +118,8 @@ type AiConnection = {
   chutesKey?: string;
   openrouterKey?: string;
   explodedModel?: string;
+  /** open-weight exploded views: Qwen-Image-2512 + our LoRA on a RunPod serverless endpoint (ATLAS_EXPLODED_PROVIDER=lora + RUNPOD_API_KEY + ATLAS_LORA_ENDPOINT) */
+  lora?: { endpoint: string; apiKey: string };
   visionProvider?: 'openai' | 'tao1';
   tao1?: Tao1Connection;
 };
@@ -143,6 +145,9 @@ function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', ima
     return {
       apiKey: '', baseUrl: '', draftModel: tao1.model, researchModel: tao1.model, deepResearchModel: tao1.model, supplierResearchModel: tao1.model, imageModel: 'chutes/qwen-image-2512',
       tao1, textProvider: 'tao1', visionProvider: 'tao1', imageProvider: 'chutes', chutesKey: process.env.CHUTES_API_KEY?.trim(),
+      lora: process.env.ATLAS_EXPLODED_PROVIDER?.trim().toLowerCase() === 'lora' && process.env.RUNPOD_API_KEY?.trim() && process.env.ATLAS_LORA_ENDPOINT?.trim()
+        ? { endpoint: process.env.ATLAS_LORA_ENDPOINT.trim(), apiKey: process.env.RUNPOD_API_KEY.trim() }
+        : undefined,
     };
   }
   const base = getAiConnectionBase(request);
@@ -159,6 +164,9 @@ function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', ima
     // exploded views on OpenRouter (ATLAS_EXPLODED_PROVIDER=openrouter + OPENROUTER_API_KEY): the cheapest model that draws a real exploded diagram
     openrouterKey: process.env.ATLAS_EXPLODED_PROVIDER?.trim().toLowerCase() === 'openrouter' ? process.env.OPENROUTER_API_KEY?.trim() || undefined : undefined,
     explodedModel: process.env.ATLAS_EXPLODED_MODEL?.trim() || 'google/gemini-3.1-flash-image',
+    lora: process.env.ATLAS_EXPLODED_PROVIDER?.trim().toLowerCase() === 'lora' && process.env.RUNPOD_API_KEY?.trim() && process.env.ATLAS_LORA_ENDPOINT?.trim()
+      ? { endpoint: process.env.ATLAS_LORA_ENDPOINT.trim(), apiKey: process.env.RUNPOD_API_KEY.trim() }
+      : undefined,
     visionProvider: tao1 && visionWanted === 'tao1' ? 'tao1' : 'openai',
   };
 }
@@ -170,7 +178,7 @@ function reportedModels(connection: AiConnection, deep = false) {
   return {
     researchModel: tao1Text ?? (deep ? connection.deepResearchModel : connection.draftModel),
     supplierResearchModel: tao1Text ?? connection.supplierResearchModel,
-    imageModel: connection.openrouterKey ? `${image} + ${connection.explodedModel ?? 'google/gemini-3.1-flash-image'}` : image,
+    imageModel: connection.lora ? `${image} + qwen-image-2512 exploded LoRA` : connection.openrouterKey ? `${image} + ${connection.explodedModel ?? 'google/gemini-3.1-flash-image'}` : image,
   };
 }
 
@@ -1034,6 +1042,8 @@ function correctionFor(issues: string[], composition: string) {
   return `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${lettering ? 'It contained unreadable or misspelled lettering. Draw ABSOLUTELY NO TEXT: no labels, no captions, no callouts, no map lettering, no numbers, no letters, no logos; every part is a plain unlabeled shape. ' : ''}${rest} ${composition}`;
 }
 
+const EXPLODED_DEFERRED = 'Exploded view deferred: rendered after the atlas is ready.';
+
 /** the promise, or a rejection after ms (the work behind it may keep running until the function ends) */
 function raceBudget<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -1062,14 +1072,44 @@ async function generateImage(
 
   let retryDirection = '';
   // Chutes exploded views are strict (Master 10-12): live clicks make 1 attempt (a person is waiting); prebuild/background builds (admin header x-atlas-exploded-attempts, 1-3) retry, the QA must pass, and an exploded image that never passes is left out (the atlas then shows the inventory view)
+  const loraExploded = mode === 'exploded' && Boolean(connection.lora);
   const orExploded = mode === 'exploded' && Boolean(connection.openrouterKey);
-  const strictExploded = mode === 'exploded' && (connection.imageProvider === 'chutes' || orExploded);
-  const attempts = (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
+  const strictExploded = mode === 'exploded' && (connection.imageProvider === 'chutes' || orExploded || loraExploded);
+  const attempts = loraExploded ? Math.max(1, Number(process.env.ATLAS_LORA_ATTEMPTS) || 6) : (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
   const explodedBudgetMs = Number(process.env.ATLAS_EXPLODED_BUDGET_MS) || 420_000;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     // the exploded view never holds the atlas back: past its time budget the build ships assembled-only
     if (mode === 'exploded' && ledgerElapsedMs() > explodedBudgetMs) throw new Error('Exploded view skipped: the time budget was reached.');
     const lastAttempt = attempt === attempts - 1;
+    if (loraExploded && connection.lora) {
+      const loraPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
+      const generated = await loraGenerateImage(connection.lora.endpoint, connection.lora.apiKey, loraPrompt).catch((error: unknown) => { console.warn('LoRA image call failed', error); return null; });
+      if (!generated) { if (lastAttempt) throw new Error('Exploded view: the image service returned no image.'); continue; }
+      recordImage(`image-${mode}`, generated.model, { usage: undefined }, { quality: 'lora', provider: 'other', ms: generated.ms, usd: generated.cost ?? undefined });
+      try {
+        // judge the LAYOUT first (the open model paints pseudo-text), then remove all lettering with an open-weight edit model and run the full strict QA on what a person will see
+        const layout = await assessGeneratedImage(connection, generated.dataUrl, subject, mode, true);
+        if (!layout.pass) {
+          if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${layout.issues.join(' ').slice(0, 200)}`);
+          retryDirection = correctionFor(layout.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
+          continue;
+        }
+        let finalImage = generated.dataUrl;
+        if (connection.chutesKey) {
+          const cleaned = await chutesRemoveText(connection.chutesKey, generated.dataUrl).catch((error: unknown) => { console.warn('Text removal failed', error); return null; });
+          if (cleaned) { recordImage('image-text-removal', cleaned.model, { usage: undefined }, { quality: 'chutes', provider: 'other', ms: cleaned.ms }); finalImage = cleaned.dataUrl; }
+        }
+        const strict = await assessGeneratedImage(connection, finalImage, subject, mode);
+        if (strict.pass) return finalImage;
+        if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${strict.issues.join(' ').slice(0, 200)}`);
+        retryDirection = correctionFor(strict.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
+      } catch (error) {
+        if (/did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
+        console.warn('LoRA exploded QA unavailable', error);
+        if (lastAttempt) throw new Error('Exploded view could not be checked by visual QA.');
+      }
+      continue;
+    }
     if (orExploded && connection.openrouterKey) {
       const orPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
       const generated = await openrouterGenerateImage(connection.openrouterKey, attempt < 1 ? (connection.explodedModel ?? 'google/gemini-3.1-flash-image') : (process.env.ATLAS_EXPLODED_FALLBACK_MODEL?.trim() || 'google/gemini-3.1-flash-lite-image'), orPrompt).catch((error: unknown) => { console.warn('OpenRouter image call failed', error); return null; });
@@ -1154,6 +1194,7 @@ async function assessGeneratedImage(
   image: string,
   subject: string,
   mode: 'assembled' | 'exploded',
+  layoutOnly = false,
 ) {
   const schema = {
     type: 'object',
@@ -1164,7 +1205,8 @@ async function assessGeneratedImage(
       issues: { type: 'array', items: { type: 'string' }, maxItems: 8 },
     },
   } as const;
-  const passRule = mode === 'assembled'
+  const layoutRule = 'Pass only when no complete intact assembled product is shown (neither dominating the frame nor beside the parts), the visible pieces all belong to one disassembled subject, and components are distinct and distributed across the useful frame rather than piled at its center. Repeated parts and repeated sub-assemblies are allowed. IGNORE any text, lettering, labels, numbers or pseudo-text completely: they are removed later and must not affect the verdict. Judge only the exploded LAYOUT.';
+  const passRule = layoutOnly && mode === 'exploded' ? layoutRule : mode === 'assembled'
     ? 'Pass only when exactly one intact subject is shown, it is fully visible, it occupies most of the useful frame, and there is no second copy, exploded arrangement, inset, or excessive empty border.'
     : 'Pass only when no complete intact assembled product is shown (neither dominating the frame nor beside the parts), the visible pieces all belong to one disassembled subject, components are distinct and distributed across the useful frame rather than piled at its center. Repeated parts and repeated sub-assemblies are allowed. FAIL when the image contains visible text, labels, letters or numbers that are garbled, misspelled, irrelevant or illegible; legible and correct labels are acceptable.';
   const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a complete reference copy merely because other parts are exploded.`
@@ -1371,8 +1413,10 @@ export async function POST(request: Request) {
       report({ stage: 'render', message: 'Rendering the exploded view again…' });
       const explodedImage = await generateImage(connection, saved.subject, '', 'exploded', saved.parts, saved.imageOrientation ?? 'landscape', 3);
       const hotspots = await locateHotspots(connection, explodedImage, saved.parts).catch(() => fallbackHotspots(saved.parts));
-      const save = saved.buildStage === 'complete' ? saveAtlasToGallery : saveAtlasDraft;
-      const atlas = await save({ ...saved, explodedImage, explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${saved.subject}`, hotspots, buildCost: mergeBuildCost(saved.buildCost, summarizeLedger()) }, prompt);
+      // the suppliers pass may have saved a newer copy while this render ran: merge the exploded view into the FRESHEST copy instead of overwriting it with the one loaded at the start
+      const fresh = (await loadGalleryAtlas(promptCacheKey)) ?? (await loadAtlasDraft(promptCacheKey)) ?? saved;
+      const save = fresh.buildStage === 'complete' ? saveAtlasToGallery : saveAtlasDraft;
+      const atlas = await save({ ...fresh, explodedImage, explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${saved.subject}`, hotspots, buildCost: mergeBuildCost(fresh.buildCost, summarizeLedger()) }, prompt);
       report({ stage: 'done', message: 'Exploded view added.' });
       return NextResponse.json({ atlas, cached: false, reexploded: true });
     } catch (error) {
@@ -1409,8 +1453,12 @@ export async function POST(request: Request) {
           : Promise.resolve(draft.hotspots),
       ]);
       report({ stage: 'save', message: 'Publishing the completed supplier and IP edition to the shared gallery…' });
+      // an exploded view rendered in parallel (LoRA pass) is saved to the draft record: keep it
+      const latestDraft = await loadAtlasDraft(promptCacheKey).catch(() => null);
+      const keepExploded = !draft.explodedImage && latestDraft?.explodedImage ? { explodedImage: latestDraft.explodedImage, explodedImageAlt: latestDraft.explodedImageAlt, hotspots: latestDraft.hotspots } : {};
       const atlas = await saveAtlasToGallery({
         ...draft,
+        ...keepExploded,
         subject: enriched.subject,
         subtitle: enriched.subtitle,
         category: enriched.category,
@@ -1418,7 +1466,7 @@ export async function POST(request: Request) {
         accuracyNote: enriched.accuracyNote,
         parts: enriched.parts,
         sources: enriched.sources,
-        hotspots: mappedHotspots,
+        hotspots: mappedHotspots ?? (keepExploded as { hotspots?: typeof mappedHotspots }).hotspots,
         buildStage: 'complete',
         generatedAt: new Date().toISOString(),
         buildCost: mergeBuildCost(draft.buildCost, summarizeLedger()),
@@ -1542,7 +1590,9 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     // (ATLAS_EXPLODED_GRACE_MS, default 45 s, never past ATLAS_EXPLODED_BUDGET_MS) and is otherwise left for a later pass.
     const assembledPromise = generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
       .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; });
-    const explodedPromise = generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin, connection.openrouterKey ? 3 : 1))
+    // the LoRA exploded view (serverless GPU, cold start of minutes) is never waited for here: the draft ships assembled and the jobs runner renders the exploded view in its own 'reexplode' pass while the suppliers are researched
+    const deferExploded = Boolean(connection.lora) && process.env.ATLAS_LORA_DEFER !== '0' && !isAdmin;
+    const explodedPromise = (deferExploded ? Promise.reject(new Error(EXPLODED_DEFERRED)) : generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin, connection.openrouterKey ? 3 : 1)))
       .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; });
     explodedPromise.catch(() => undefined);
     const assembledResult = (await Promise.allSettled([assembledPromise]))[0];
@@ -1552,7 +1602,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     const imageResults = [assembledResult, explodedResult] as const;
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
     const explodedImage = imageResults[1].status === 'fulfilled' ? imageResults[1].value : undefined;
-    const imageWarnings = imageResults.flatMap((result, index) => result.status === 'rejected'
+    const imageWarnings = imageResults.flatMap((result, index) => result.status === 'rejected' && !(result.reason instanceof Error && result.reason.message === EXPLODED_DEFERRED)
       ? [`${index === 0 ? 'Assembled' : 'Exploded'} image: ${result.reason instanceof Error ? result.reason.message : 'generation failed.'}`]
       : []);
     const imageWarning = imageWarnings.length ? imageWarnings.join(' ') : undefined;
