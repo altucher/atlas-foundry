@@ -134,6 +134,7 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
       } else {
       const enrich = enrichRun;
       if (enrich.buildId) job.buildIds = [...(job.buildIds ?? []), enrich.buildId];
+      if (enrich.status === 200 && enrich.payload.suppliersUnavailable === true) job.warning = `${job.warning ? `${job.warning} ` : ''}Suppliers unavailable: no supplier relationships could be established for this subject.`;
       if (enrich.status !== 200) job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish: ${String(enrich.payload.error ?? enrich.status).slice(0, 160)}`;
       }
     }

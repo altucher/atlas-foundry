@@ -6,6 +6,7 @@ import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard'
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
 import { sanitizeSupplierResult } from '@/app/supplier-sanitize';
+import { auditLooksEmpty, supplierCount, vendorPinStore } from '@/app/vendor-fallback';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho, ledgerElapsedMs } from '@/app/cost-ledger';
@@ -611,7 +612,8 @@ async function generateResearchInBackground(
   if (connection.textProvider === 'tao1' && connection.tao1 && typeof body.input === 'string') {
     report({ stage: progress.stage, message: `${progress.message} (through the TAO-1 API)…` });
     // optional cheaper open-weight cell per stage (TAO-1 founder parameter only_model, e.g. engy/deepseek-v4.1-flash); unset = the default tao-1 cell
-    const onlyModel = (progress.stage === 'vendor' ? process.env.ATLAS_VENDOR_ONLY_MODEL : progress.stage === 'research' || progress.stage === 'recovery' ? process.env.ATLAS_RESEARCH_ONLY_MODEL : undefined)?.trim() || undefined;
+    const vendorPin = vendorPinStore.getStore()?.pin;
+    const onlyModel = (progress.stage === 'vendor' ? (vendorPin !== undefined ? vendorPin : process.env.ATLAS_VENDOR_ONLY_MODEL) : progress.stage === 'research' || progress.stage === 'recovery' ? process.env.ATLAS_RESEARCH_ONLY_MODEL : undefined)?.trim() || undefined;
     const payload = await tao1StructuredCall(connection.tao1, body, onlyModel);
     recordResponse(progress.stage, onlyModel ?? connection.tao1.model, payload, { provider: 'tao1' });
     return payload;
@@ -1400,7 +1402,7 @@ export async function POST(request: Request) {
     try {
       report({ stage: 'vendor', message: `The first draft is live. Auditing suppliers, alternates, generations, and embedded IP for ${draft.parts.length} components in the background…` });
       const normalizedDraft = normalizeAtlas({ ...draft, visualPrompt: '' });
-      const [enriched, mappedHotspots] = await Promise.all([
+      const [firstEnriched, mappedHotspots] = await Promise.all([
         enrichSuppliers({ ...connection, supplierResearchModel: connection.supplierResearchModel }, normalizedDraft, report),
         draft.explodedImage
           ? locateHotspots(connection, draft.explodedImage, normalizedDraft.parts).catch((error) => {
@@ -1409,6 +1411,16 @@ export async function POST(request: Request) {
             })
           : Promise.resolve(draft.hotspots),
       ]);
+      // an empty audit from a pinned (cheaper) cell is re-run once on the default cell; still empty => flagged, never silent
+      let enriched = firstEnriched;
+      let vendorFallbackUsed = false;
+      if (process.env.ATLAS_VENDOR_ONLY_MODEL?.trim() && auditLooksEmpty(firstEnriched.parts)) {
+        report({ stage: 'vendor', message: 'The first supplier pass came back empty; checking once more…' });
+        console.warn(`Supplier audit empty on the pinned cell (${supplierCount(firstEnriched.parts)} relationships); re-running on the default cell`);
+        vendorFallbackUsed = true;
+        enriched = await vendorPinStore.run({ pin: '' }, () => enrichSuppliers({ ...connection, supplierResearchModel: connection.supplierResearchModel }, normalizedDraft, report));
+      }
+      const suppliersUnavailable = supplierCount(enriched.parts) < 3;
       report({ stage: 'save', message: 'Publishing the completed supplier and IP edition to the shared gallery…' });
       const atlas = await saveAtlasToGallery({
         ...draft,
@@ -1429,6 +1441,8 @@ export async function POST(request: Request) {
         atlas,
         cached: false,
         enriched: true,
+        suppliersUnavailable,
+        vendorFallbackUsed,
         supplierResearchModel: reportedModels(connection).supplierResearchModel,
       });
     } catch (error) {
