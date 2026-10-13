@@ -6,7 +6,7 @@ import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard'
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
 import { sanitizeSupplierResult } from '@/app/supplier-sanitize';
-import { escalateWarm, fallbackConfigured, isCapacityError, primaryRunpodOn, runpodBaseImage } from '@/app/image-fallback';
+import { escalateWarm, fallbackConfigured, isCapacityError, liveHasFreeWorker, loraEndpointUsable, primaryRunpodOn, runpodBaseImage } from '@/app/image-fallback';
 import { trimSupplierSchema, VENDOR_OUTPUT_BUDGET } from '@/app/vendor-trim';
 import { auditLooksEmpty, mergeAudits, supplierCount, unsourcedShare, vendorPinStore } from '@/app/vendor-fallback';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText, loraGenerateImage, chutesRemoveText } from '@/app/tao1-image';
@@ -1100,6 +1100,8 @@ async function generateImage(
   const loraBudgetMs = Number(process.env.ATLAS_LORA_BUDGET_MS) || 75_000;
   const loraStart = Date.now();
   let loraOff = false;
+  // no worker on the LoRA endpoint (cold or gone): go straight to the Chutes exploded path instead of spending the LoRA cap on a queue
+  if (loraFallback && connection.lora && !(await loraEndpointUsable(connection.lora.endpoint, connection.lora.apiKey))) loraOff = true;
   const attempts = loraExploded ? (loraFallback ? loraAttempts + explodedAttempts : loraAttempts) : (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
   const explodedBudgetMs = Number(process.env.ATLAS_EXPLODED_BUDGET_MS) || 420_000;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -1166,7 +1168,7 @@ async function generateImage(
       let generated: ImageResult | undefined;
       let generatedUsd: number | undefined;
       // PRIMARY (founder 10-13): the assembled image comes from OUR always-warm Qwen-Image-2512 endpoint first; any failure falls through to Chutes below
-      if (mode === 'assembled' && primaryRunpodOn()) {
+      if (mode === 'assembled' && primaryRunpodOn() && await liveHasFreeWorker()) {
         try {
           const alt = await runpodBaseImage(chutesPrompt.slice(0, 1800), imageOrientation === 'portrait' ? 1024 : 1280, imageOrientation === 'portrait' ? 1280 : 864, 150_000);
           generated = { model: 'runpod/qwen-image-2512+lightning', dataUrl: alt.dataUrl, mime: 'image/png', bytes: alt.dataUrl.length, ms: alt.ms, sourceUrl: 'runpod', usage: null, width: null, height: null };

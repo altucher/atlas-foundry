@@ -18,6 +18,40 @@ export function primaryRunpodOn() {
   return process.env.ATLAS_IMAGE_PRIMARY?.trim().toLowerCase() === 'runpod' && Boolean(process.env.RUNPOD_API_KEY?.trim()) && Boolean(imageEndpoint());
 }
 
+type Workers = { idle: number; ready: number; running: number; initializing: number };
+const healthCache = new Map<string, { at: number; workers: Workers | null }>();
+
+/** worker counts of a RunPod endpoint (cached 5 s, 3 s timeout); null = unknown, and an unknown state never blocks a call */
+export async function endpointWorkers(endpoint: string, apiKey: string): Promise<Workers | null> {
+  const hit = healthCache.get(endpoint);
+  if (hit && Date.now() - hit.at < 5000) return hit.workers;
+  let workers: Workers | null = null;
+  try {
+    const response = await fetch(`https://api.runpod.ai/v2/${endpoint}/health`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(3000) });
+    if (response.ok) {
+      const body = await response.json() as { workers?: Partial<Workers> };
+      const w = body.workers ?? {};
+      workers = { idle: w.idle ?? 0, ready: w.ready ?? 0, running: w.running ?? 0, initializing: w.initializing ?? 0 };
+    }
+  } catch { workers = null; }
+  healthCache.set(endpoint, { at: Date.now(), workers });
+  return workers;
+}
+
+/** Master 10-13: a person is waiting for the assembled image, so our endpoint is used only when a worker is free right now (idle or ready); otherwise straight to Chutes instead of queueing up to 150 s. ATLAS_LIVE_HEALTH_CHECK=0 turns the check off. */
+export async function liveHasFreeWorker() {
+  if (process.env.ATLAS_LIVE_HEALTH_CHECK === '0') return true;
+  const workers = await endpointWorkers(imageEndpoint(), process.env.RUNPOD_API_KEY?.trim() ?? '');
+  return workers === null || workers.idle + workers.ready > 0;
+}
+
+/** the exploded view is not a user wait (75 s LoRA cap): skip the LoRA when the endpoint has no worker at all or none even starting its first job */
+export async function loraEndpointUsable(endpoint: string, apiKey: string) {
+  if (process.env.ATLAS_LIVE_HEALTH_CHECK === '0') return true;
+  const workers = await endpointWorkers(endpoint, apiKey);
+  return workers === null || workers.idle + workers.ready + workers.running > 0;
+}
+
 export function isCapacityError(error: unknown) {
   return /HTTP (429|500|502|503)|at maximum capacity|No infrastructure available/i.test(String(error instanceof Error ? error.message : error));
 }

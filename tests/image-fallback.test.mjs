@@ -26,10 +26,14 @@ globalThis.fetch = async (url, init) => {
     (globalThis.__calls ??= []).push({ method: init?.method, body: init?.body ? JSON.parse(init.body) : null });
     return { ok: true, json: async () => ({ workersMin: globalThis.__ep.workersMin, workersMax: globalThis.__ep.workersMax }) };
   }
+  if (u.startsWith('https://api.runpod.ai/v2/') && u.endsWith('/health')) {
+    if (globalThis.__healthThrows) throw new Error('network');
+    return { ok: true, json: async () => ({ workers: globalThis.__workers }) };
+  }
   return realFetch(url, init);
 };
 process.env.ATLAS_BASE_WARM = '1'; process.env.RUNPOD_API_KEY = 'x'.repeat(30); process.env.ATLAS_BASE_ENDPOINT = 'ep123';
-const { escalateWarm, coolDownIfDue, isCapacityError, fallbackConfigured, primaryRunpodOn, imageEndpoint } = await import(pathToFileURL(out).href);
+const { escalateWarm, coolDownIfDue, isCapacityError, fallbackConfigured, primaryRunpodOn, imageEndpoint, liveHasFreeWorker, loraEndpointUsable } = await import(pathToFileURL(out).href);
 const patches = () => (globalThis.__calls ?? []).filter((c) => c.method === 'PATCH');
 
 test('capacity errors are recognised, others are not', () => {
@@ -76,4 +80,32 @@ test('the live endpoint is the primary only when asked for and fully configured;
   process.env.ATLAS_LIVE_ENDPOINT = 'live999'; assert.equal(imageEndpoint(), 'live999');
   const key = process.env.RUNPOD_API_KEY; delete process.env.RUNPOD_API_KEY; assert.equal(primaryRunpodOn(), false); process.env.RUNPOD_API_KEY = key;
   delete process.env.ATLAS_LIVE_ENDPOINT; delete process.env.ATLAS_IMAGE_PRIMARY;
+});
+
+test('health check: a user job goes to our endpoint only when a worker is idle or ready; unknown state never blocks', async () => {
+  process.env.ATLAS_LIVE_ENDPOINT = 'live-a';
+  globalThis.__workers = { idle: 1, ready: 0, running: 0, initializing: 0 };
+  assert.equal(await liveHasFreeWorker(), true);
+  process.env.ATLAS_LIVE_ENDPOINT = 'live-b';
+  globalThis.__workers = { idle: 0, ready: 0, running: 2, initializing: 0 };
+  assert.equal(await liveHasFreeWorker(), false, 'all workers busy -> Chutes at once');
+  process.env.ATLAS_LIVE_ENDPOINT = 'live-c';
+  globalThis.__workers = { idle: 0, ready: 0, running: 0, initializing: 2 };
+  assert.equal(await liveHasFreeWorker(), false, 'cold-starting only -> Chutes at once');
+  process.env.ATLAS_LIVE_ENDPOINT = 'live-d';
+  globalThis.__healthThrows = true;
+  assert.equal(await liveHasFreeWorker(), true, 'health unreachable -> unknown, not blocked');
+  globalThis.__healthThrows = false;
+  process.env.ATLAS_LIVE_HEALTH_CHECK = '0';
+  process.env.ATLAS_LIVE_ENDPOINT = 'live-e';
+  globalThis.__workers = { idle: 0, ready: 0, running: 0, initializing: 0 };
+  assert.equal(await liveHasFreeWorker(), true, 'check switched off');
+  delete process.env.ATLAS_LIVE_HEALTH_CHECK;
+});
+
+test('health check for the LoRA exploded step: a busy worker is fine (not a user wait), cold-only or none is skipped', async () => {
+  globalThis.__workers = { idle: 0, ready: 0, running: 1, initializing: 0 };
+  assert.equal(await loraEndpointUsable('lora-a', 'k'.repeat(30)), true);
+  globalThis.__workers = { idle: 0, ready: 0, running: 0, initializing: 2 };
+  assert.equal(await loraEndpointUsable('lora-b', 'k'.repeat(30)), false);
 });
