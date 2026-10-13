@@ -595,7 +595,7 @@ async function generateResearchInBackground(
   if (connection.textProvider === 'tao1' && connection.tao1 && typeof body.input === 'string') {
     report({ stage: progress.stage, message: `${progress.message} (through the TAO-1 API)…` });
     // optional cheaper open-weight cell per stage (TAO-1 founder parameter only_model, e.g. engy/deepseek-v4.1-flash); unset = the default tao-1 cell
-    const onlyModel = progress.stage === 'vendor' ? process.env.ATLAS_VENDOR_ONLY_MODEL?.trim() || undefined : undefined;
+    const onlyModel = (progress.stage === 'vendor' ? process.env.ATLAS_VENDOR_ONLY_MODEL : progress.stage === 'research' || progress.stage === 'recovery' ? process.env.ATLAS_RESEARCH_ONLY_MODEL : undefined)?.trim() || undefined;
     const payload = await tao1StructuredCall(connection.tao1, body, onlyModel);
     recordResponse(progress.stage, onlyModel ?? connection.tao1.model, payload, { provider: 'tao1' });
     return payload;

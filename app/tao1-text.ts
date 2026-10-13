@@ -38,7 +38,9 @@ export type Tao1Usage = { prompt_tokens?: number; completion_tokens?: number };
 export async function tao1StructuredCall(conn: Tao1Connection, body: Record<string, unknown>, onlyModel?: string): Promise<Record<string, unknown>> {
   const text = body.text as { format?: { schema?: Record<string, unknown>; name?: string } } | undefined;
   const schema = text?.format?.schema ?? {};
-  const maxOut = typeof body.max_output_tokens === 'number' ? body.max_output_tokens : 32_000;
+  // ATLAS_TAO1_MAX_TOKENS raises the output cap for the big research/vendor answers (engines 10-13: ~48000 stops answers being cut at 32k)
+  const maxOutOverride = Number(process.env.ATLAS_TAO1_MAX_TOKENS);
+  const maxOut = Number.isFinite(maxOutOverride) && maxOutOverride > 0 ? maxOutOverride : typeof body.max_output_tokens === 'number' ? body.max_output_tokens : 32_000;
   const system = `${String(body.instructions ?? '')}
 
 You have live web search: search before you answer and cite only pages you actually found. When the schema has a sources list, return as many distinct authoritative sources as the subject supports (manufacturer pages and manuals, standards, museums, universities, filings): at least 15, and at least 25 when the subject has more than 30 components, as long as each is a different real page you found. When the schema asks for coverage records, return exactly one for every component id supplied. Reply with ONE JSON object and nothing else: no prose, no code fence. It must satisfy this JSON schema exactly (every required key present, no extra keys):
