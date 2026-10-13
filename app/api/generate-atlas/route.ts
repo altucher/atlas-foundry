@@ -1155,7 +1155,7 @@ async function assessGeneratedImage(
   const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a complete reference copy merely because other parts are exploded.`
   if (connection.visionProvider === 'tao1' && connection.tao1) {
     const r = await tao1VisionText(connection.tao1, `${qaInstructions}\nReply with ONE JSON object and nothing else: {"pass": boolean, "issues": [short strings, at most 8]}.`, 'Inspect this image.', image, 1500, process.env.ATLAS_QA_ONLY_MODEL?.trim() || undefined);
-    recordResponse('image-qa', process.env.ATLAS_QA_ONLY_MODEL?.trim() || connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
+    recordResponse('image-qa', process.env.ATLAS_QA_ONLY_MODEL?.trim() || connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens, input_tokens_details: { cached_tokens: r.usage.prompt_tokens_details?.cached_tokens ?? 0 } } : undefined }, { provider: 'tao1', ms: r.ms });
     const m = /\{[\s\S]*\}/.exec(r.text);
     const parsed = m ? JSON.parse(m[0]) as { pass?: boolean; issues?: string[] } : null;
     if (!parsed || typeof parsed.pass !== 'boolean') throw new Error('Image QA reply was not usable.');
@@ -1209,7 +1209,7 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
   const hotspotInstructions = 'Locate components in an exploded-view product image. Return a tight clickable bounding rectangle for each requested component cluster. Express its center as x/y percentages and its size as width/height percentages of the full image, measured from the top-left corner. Use every exact id once. If several adjacent pieces form one system, enclose that cluster. Do not include unrelated neighboring parts.'
   if (connection.visionProvider === 'tao1' && connection.tao1) {
     const r = await tao1VisionText(connection.tao1, `${hotspotInstructions}\nReply with ONE JSON object and nothing else: {"hotspots":[{"id": string, "x": number 0-100, "y": number 0-100, "width": number 1-100, "height": number 1-100}]} with one entry for every requested id.`, `Locate these components:\n${partList}`, explodedImage, 6000, process.env.ATLAS_HOTSPOT_ONLY_MODEL?.trim() || undefined);
-    recordResponse('hotspots', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
+    recordResponse('hotspots', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens, input_tokens_details: { cached_tokens: r.usage.prompt_tokens_details?.cached_tokens ?? 0 } } : undefined }, { provider: 'tao1', ms: r.ms });
     const m = /\{[\s\S]*\}/.exec(r.text);
     if (!m) throw new Error('Hotspot reply was not usable.');
     return applyLocatedHotspots(fallback, JSON.parse(m[0]) as { hotspots?: Array<AtlasHotspot & { id: string }> }, parts);

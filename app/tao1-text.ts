@@ -32,7 +32,7 @@ function requiredKeysMissing(value: unknown, schema: Record<string, unknown>) {
   return required.filter((key) => !(key in (value as Record<string, unknown>)));
 }
 
-export type Tao1Usage = { prompt_tokens?: number; completion_tokens?: number };
+export type Tao1Usage = { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } };
 
 /** one structured research call; returns a Responses-shaped completed payload */
 export async function tao1StructuredCall(conn: Tao1Connection, body: Record<string, unknown>, onlyModel?: string): Promise<Record<string, unknown>> {
@@ -66,7 +66,13 @@ ${JSON.stringify(schema)}`;
       throw new Error(`TAO-1 text call failed (${response.status}): ${detail}`);
     }
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; usage?: Tao1Usage };
-    usage = { prompt_tokens: (usage.prompt_tokens ?? 0) + (payload.usage?.prompt_tokens ?? 0), completion_tokens: (usage.completion_tokens ?? 0) + (payload.usage?.completion_tokens ?? 0) };
+    usage = {
+      prompt_tokens: (usage.prompt_tokens ?? 0) + (payload.usage?.prompt_tokens ?? 0),
+      completion_tokens: (usage.completion_tokens ?? 0) + (payload.usage?.completion_tokens ?? 0),
+      // cached prompt tokens (billed at the cached rate) and reasoning tokens: the usage record must carry them or a cached token is billed as a plain one
+      prompt_tokens_details: { cached_tokens: (usage.prompt_tokens_details?.cached_tokens ?? 0) + (payload.usage?.prompt_tokens_details?.cached_tokens ?? 0) },
+      completion_tokens_details: { reasoning_tokens: (usage.completion_tokens_details?.reasoning_tokens ?? 0) + (payload.usage?.completion_tokens_details?.reasoning_tokens ?? 0) },
+    };
     const content = payload.choices?.[0]?.message?.content ?? '';
     try {
       // a gateway-salvaged cut answer comes back with finish_reason 'length': it parses but is partial, so it is never accepted as a whole result
@@ -78,7 +84,7 @@ ${JSON.stringify(schema)}`;
         status: 'completed',
         model: conn.model,
         output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(parsed) }] }],
-        usage: { input_tokens: usage.prompt_tokens, output_tokens: usage.completion_tokens },
+        usage: { input_tokens: usage.prompt_tokens, output_tokens: usage.completion_tokens, input_tokens_details: { cached_tokens: usage.prompt_tokens_details?.cached_tokens ?? 0 }, output_tokens_details: { reasoning_tokens: usage.completion_tokens_details?.reasoning_tokens ?? 0 } },
       };
     } catch (error) {
       lastError = error instanceof Error ? error.message : 'invalid reply';

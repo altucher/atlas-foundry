@@ -25,7 +25,7 @@ function gateway(replies) {
       calls.push(JSON.parse(body));
       const reply = replies[Math.min(calls.length - 1, replies.length - 1)];
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ choices: [{ message: { content: reply.content }, finish_reason: reply.finish ?? 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } }));
+      res.end(JSON.stringify({ choices: [{ message: { content: reply.content }, finish_reason: reply.finish ?? 'stop' }], usage: reply.usage ?? { prompt_tokens: 10, completion_tokens: 5 } }));
     });
   });
   server.unref();
@@ -61,4 +61,13 @@ test('a vision reply cut short (finish_reason length) is rejected', async () => 
   const { tao1VisionText } = await import(pathToFileURL(visionOut).href);
   await assert.rejects(() => tao1VisionText(conn, 'sys', 'user', 'data:image/png;base64,AAAA', 100), /cut short/);
   server.close();
+});
+
+test('cached prompt tokens reach the usage record (summed over attempts)', async () => {
+  const usage = { prompt_tokens: 1000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 400 } };
+  const { server, conn } = await gateway([{ content: '{"parts":[1]}', finish: 'stop', usage }]);
+  const payload = await tao1StructuredCall(conn, body);
+  server.close();
+  assert.equal(payload.usage.input_tokens, 1000);
+  assert.equal(payload.usage.input_tokens_details.cached_tokens, 400);
 });
