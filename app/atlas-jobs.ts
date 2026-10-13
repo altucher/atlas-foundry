@@ -131,9 +131,10 @@ export function billableUsage(records: UsageRecord[], opts: { explodedDelivered:
     if (!DELIVERED.has(record.outcome)) { if (record.calls) notBilled.push(...record.calls); else notBilledLines.push(...record.lines); continue; }
     if (record.calls) {
       const lastOfStage = new Map<string, number>();
-      record.calls.forEach((call, index) => { if (EXPLODED_STAGES.has(call.stage)) lastOfStage.set(call.stage, index); });
+      record.calls.forEach((call, index) => { if (EXPLODED_STAGES.has(call.stage) || call.stage === 'image-assembled') lastOfStage.set(call.stage, index); });
       record.calls.forEach((call, index) => {
         const exploded = EXPLODED_STAGES.has(call.stage);
+        if (call.stage === 'image-assembled') { if (lastOfStage.get(call.stage) === index) billed.push(call); else notBilled.push(call); return; } // the assembled image is always delivered: its final render bills, a retried one is ours
         if (!exploded || (opts.explodedDelivered && lastOfStage.get(call.stage) === index)) billed.push(call); else notBilled.push(call);
       });
     } else {

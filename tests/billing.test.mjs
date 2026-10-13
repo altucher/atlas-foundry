@@ -42,3 +42,9 @@ test('a job that failed outright has zero totals', () => {
   assert.equal(u.totals.usd, 0);
   assert.equal(u.totals.inputTokens, 0);
 });
+
+test('a retried assembled render bills once', () => {
+  const u = mod.billableUsage([rec('a', 'draft', 'draft_saved', [call(1, 'image-assembled', 0.02), call(2, 'image-assembled', 0.02), call(3, 'research', 0.05, { inputTokens: 10, outputTokens: 10 })])], { explodedDelivered: false });
+  assert.equal(u.totals.images, 1);
+  assert.ok(Math.abs(u.undelivered.usd - 0.02) < 1e-9);
+});
