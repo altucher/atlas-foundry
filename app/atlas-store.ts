@@ -42,6 +42,38 @@ function draftPath(cacheKey: string) {
   return `${galleryRoot()}/${cacheKey}/draft.json`;
 }
 
+// THE EXPLODED SIDECAR (r32): the LoRA exploded step runs in parallel with the supplier pass and either can save the atlas record last; blob reads of an overwritten record can be served stale
+// by the CDN for minutes (witness 10-13: Instant Pot draft.json was 50,407 bytes at the store and 48,110 bytes on the wire), so a read-modify-write on atlas.json / draft.json LOSES the exploded view.
+// The exploded step therefore also writes this small record under its own path, and every reader fills a missing explodedImage / hotspots from it. A blob's metadata (head) is not cached; the body of
+// a new version is fetched with ?v=<uploadedAt> so a stale copy is never read.
+function explodedSidecarPath(cacheKey: string) {
+  return `${galleryRoot()}/${cacheKey}/exploded.json`;
+}
+
+type ExplodedSidecar = { explodedImage: string; explodedImageAlt?: string; hotspots?: unknown };
+
+async function writeExplodedSidecar(cacheKey: string, atlas: { explodedImage?: string; explodedImageAlt?: string; hotspots?: unknown }) {
+  if (!atlas.explodedImage || !/^https?:\/\//.test(atlas.explodedImage)) return;
+  const record: ExplodedSidecar = { explodedImage: atlas.explodedImage, explodedImageAlt: atlas.explodedImageAlt, hotspots: atlas.hotspots };
+  await put(explodedSidecarPath(cacheKey), JSON.stringify(record), { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json', cacheControlMaxAge: 60 })
+    .catch((error) => console.warn('exploded sidecar write failed', error instanceof Error ? error.message : error));
+}
+
+/** an atlas without an exploded view gets it from the sidecar when one exists (an atlas that has one is returned unchanged) */
+async function withExploded<T extends { explodedImage?: string; explodedImageAlt?: string; hotspots?: unknown }>(cacheKey: string, atlas: T | null): Promise<T | null> {
+  if (!atlas || atlas.explodedImage) return atlas;
+  try {
+    const blob = await head(explodedSidecarPath(cacheKey));
+    const response = await fetch(`${blob.url}${blob.url.includes('?') ? '&' : '?'}v=${new Date(blob.uploadedAt).getTime()}`, { cache: 'no-store' });
+    if (!response.ok) return atlas;
+    const side = await response.json() as Partial<ExplodedSidecar>;
+    if (typeof side.explodedImage !== 'string' || !side.explodedImage) return atlas;
+    return { ...atlas, explodedImage: side.explodedImage, explodedImageAlt: atlas.explodedImageAlt ?? side.explodedImageAlt, hotspots: atlas.hotspots ?? side.hotspots };
+  } catch {
+    return atlas; // no sidecar (head throws on a miss)
+  }
+}
+
 function isFoundryAtlas(value: unknown): value is FoundryAtlas {
   if (!value || typeof value !== 'object') return false;
   const atlas = value as Partial<FoundryAtlas>;
@@ -67,7 +99,7 @@ export async function loadCachedAtlas(cacheKey: string) {
     try {
       const blob = await head(atlasPath(candidateKey));
       const atlas = await readAtlasUrl(blob.url);
-      if (atlas) return atlas;
+      if (atlas) return await withExploded(candidateKey, atlas);
     } catch {
       // Continue through any known legacy keys before reporting a miss.
     }
@@ -79,7 +111,7 @@ export async function loadAtlasDraft(cacheKey: string) {
   if (!hasSharedAtlasStore() || isBlockedKey(cacheKey)) return null;
   try {
     const blob = await head(draftPath(cacheKey));
-    return await readAtlasUrl(blob.url);
+    return await withExploded(cacheKey, await readAtlasUrl(blob.url));
   } catch {
     return null;
   }
@@ -123,6 +155,7 @@ export async function saveAtlasToGallery(atlas: FoundryAtlas, prompt: string) {
     persistImage(cacheKey, 'exploded', atlas.explodedImage),
   ]);
   const persisted: FoundryAtlas = { ...atlas, intelligenceVersion: CURRENT_INTELLIGENCE_VERSION, cacheKey, image, explodedImage, buildStage: 'complete' };
+  await writeExplodedSidecar(cacheKey, persisted);
   await put(atlasPath(cacheKey), JSON.stringify(persisted), {
     access: 'public',
     addRandomSuffix: false,
@@ -142,6 +175,7 @@ export async function saveAtlasDraft(atlas: FoundryAtlas, prompt: string) {
     persistImage(cacheKey, 'exploded', atlas.explodedImage),
   ]);
   const persisted: FoundryAtlas = { ...atlas, cacheKey, image, explodedImage, buildStage: 'draft' };
+  await writeExplodedSidecar(cacheKey, persisted);
   await put(draftPath(cacheKey), JSON.stringify(persisted), {
     access: 'public',
     addRandomSuffix: false,
