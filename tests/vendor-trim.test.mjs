@@ -14,7 +14,7 @@ test('the trimmed schema caps note, summary and relationships, and leaves the ba
   const t = trimSupplierSchema(base, 6);
   assert.equal(t.properties.relationships.items.properties.note.maxLength, 280);
   assert.equal(t.properties.coverage.items.properties.summary.maxLength, 200);
-  assert.equal(t.properties.relationships.maxItems, 24);
+  assert.equal(t.properties.relationships.maxItems, 18);
   assert.equal(t.properties.relationships.items.properties.company.type, 'string', 'other fields kept');
   assert.equal(base.properties.relationships.maxItems, 160);
   assert.equal(base.properties.relationships.items.properties.note.maxLength, undefined);
@@ -22,5 +22,5 @@ test('the trimmed schema caps note, summary and relationships, and leaves the ba
 
 test('the output budget text states the limits', () => {
   assert.match(VENDOR_OUTPUT_BUDGET, /280 characters/);
-  assert.match(VENDOR_OUTPUT_BUDGET, /at most 4 relationships/);
+  assert.match(VENDOR_OUTPUT_BUDGET, /at most 3 relationships/);
 });
