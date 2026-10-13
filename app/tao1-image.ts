@@ -152,10 +152,13 @@ export async function loraGenerateImage(endpoint: string, apiKey: string, prompt
   if (!submit.ok) throw new Error(`LoRA submit failed (${submit.status}).`);
   const job = await submit.json() as { id?: string };
   if (!job.id) throw new Error('LoRA submit returned no job id.');
-  const deadline = t0 + 9 * 60 * 1000;
+  const deadline = t0 + (Number(process.env.ATLAS_LORA_TIMEOUT_MS) || 330_000); // a cold or capacity-starved endpoint must not hold the job: give up and ship assembled-only
   for (;;) {
     await new Promise((resolve) => setTimeout(resolve, 4000));
-    if (Date.now() > deadline) throw new Error('LoRA job timed out.');
+    if (Date.now() > deadline) {
+      await undiciFetch(`https://api.runpod.ai/v2/${encodeURIComponent(endpoint)}/cancel/${job.id}`, { dispatcher, method: 'POST', headers }).catch(() => undefined);
+      throw new Error('LoRA job timed out.');
+    }
     const poll = await undiciFetch(`https://api.runpod.ai/v2/${encodeURIComponent(endpoint)}/status/${job.id}`, { dispatcher, headers });
     if (!poll.ok) continue;
     const status = await poll.json() as { status?: string; executionTime?: number; output?: { image_b64?: string }; error?: string };

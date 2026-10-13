@@ -1083,8 +1083,9 @@ async function generateImage(
     const lastAttempt = attempt === attempts - 1;
     if (loraExploded && connection.lora) {
       const loraPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
-      const generated = await loraGenerateImage(connection.lora.endpoint, connection.lora.apiKey, loraPrompt).catch((error: unknown) => { console.warn('LoRA image call failed', error); return null; });
-      if (!generated) { if (lastAttempt) throw new Error('Exploded view: the image service returned no image.'); continue; }
+      let loraTimedOut = false;
+      const generated = await loraGenerateImage(connection.lora.endpoint, connection.lora.apiKey, loraPrompt).catch((error: unknown) => { console.warn('LoRA image call failed', error); loraTimedOut = /timed out/i.test(String(error)); return null; });
+      if (!generated) { if (lastAttempt || loraTimedOut) throw new Error('Exploded view: the image service returned no image in time.'); continue; }
       recordImage(`image-${mode}`, generated.model, { usage: undefined }, { quality: 'lora', provider: 'other', ms: generated.ms, usd: generated.cost ?? undefined });
       try {
         // judge the LAYOUT first (the open model paints pseudo-text), then remove all lettering with an open-weight edit model and run the full strict QA on what a person will see
