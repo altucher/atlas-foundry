@@ -67,7 +67,9 @@ export async function tao1VisionText(conn: Tao1Connection, system: string, userT
     body: JSON.stringify({ model: conn.model, ...(onlyModel ? { only_model: onlyModel } : {}), max_tokens: maxTokens, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: imageDataUrl } }] }], metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything-vision' } }),
   });
   if (!response.ok) throw new Error(`TAO-1 vision call failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
-  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  const payload = await response.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+  // a gateway-salvaged cut reply (finish_reason 'length') would parse as a short but valid list: never use it
+  if (payload.choices?.[0]?.finish_reason === 'length') throw new Error('TAO-1 vision reply was cut short (finish_reason length).');
   return { text: payload.choices?.[0]?.message?.content ?? '', usage: payload.usage ?? null, ms: Date.now() - t0 };
 }
 

@@ -13,6 +13,8 @@ const entry = path.join(root, 'node_modules', `.tao1-text-entry-${process.pid}.t
 fs.writeFileSync(entry, `export * from '${root}/app/tao1-text.ts';\nexport { runWithLedger } from '${root}/app/cost-ledger.ts';\n`);
 buildSync({ entryPoints: [entry], bundle: true, platform: 'node', format: 'esm', outfile: out, alias: { '@': root }, external: ['undici'], logLevel: 'error' });
 const { tao1StructuredCall, runWithLedger } = await import(pathToFileURL(out).href);
+const visionOut = path.join(root, 'node_modules', `.tao1-vision-test-${process.pid}.mjs`);
+buildSync({ entryPoints: [path.join(root, 'app/tao1-image.ts')], bundle: true, platform: 'node', format: 'esm', outfile: visionOut, alias: { '@': root }, external: ['undici'], logLevel: 'error' });
 
 function gateway(replies) {
   const calls = [];
@@ -52,4 +54,11 @@ test('the retry budget stops before another attempt once the request is past it'
   server.close();
   delete process.env.ATLAS_RESEARCH_BUDGET_MS;
   assert.equal(calls.length, 0, 'no call may start past the budget');
+});
+
+test('a vision reply cut short (finish_reason length) is rejected', async () => {
+  const { server, conn } = await gateway([{ content: '{"hotspots":[{"id":"a","x":1,"y":1,"width":1,"height":1}]}', finish: 'length' }]);
+  const { tao1VisionText } = await import(pathToFileURL(visionOut).href);
+  await assert.rejects(() => tao1VisionText(conn, 'sys', 'user', 'data:image/png;base64,AAAA', 100), /cut short/);
+  server.close();
 });
