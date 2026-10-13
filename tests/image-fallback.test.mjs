@@ -29,7 +29,7 @@ globalThis.fetch = async (url, init) => {
   return realFetch(url, init);
 };
 process.env.ATLAS_BASE_WARM = '1'; process.env.RUNPOD_API_KEY = 'x'.repeat(30); process.env.ATLAS_BASE_ENDPOINT = 'ep123';
-const { escalateWarm, coolDownIfDue, isCapacityError, fallbackConfigured } = await import(pathToFileURL(out).href);
+const { escalateWarm, coolDownIfDue, isCapacityError, fallbackConfigured, primaryRunpodOn, imageEndpoint } = await import(pathToFileURL(out).href);
 const patches = () => (globalThis.__calls ?? []).filter((c) => c.method === 'PATCH');
 
 test('capacity errors are recognised, others are not', () => {
@@ -67,4 +67,13 @@ test('the cooldown does nothing while the window is open and restores min 0 + th
   assert.equal((await coolDownIfDue()).acted, false, 'only once');
   const log = JSON.parse(globalThis.__blob.get('atlas-foundry/test/_ops/warm-log.json'));
   assert.equal(log.at(-1).action, 'warm-off');
+});
+
+test('the live endpoint is the primary only when asked for and fully configured; the live id wins over the base id', () => {
+  delete process.env.ATLAS_IMAGE_PRIMARY; assert.equal(primaryRunpodOn(), false);
+  process.env.ATLAS_IMAGE_PRIMARY = 'runpod'; assert.equal(primaryRunpodOn(), true);
+  assert.equal(imageEndpoint(), 'ep123');
+  process.env.ATLAS_LIVE_ENDPOINT = 'live999'; assert.equal(imageEndpoint(), 'live999');
+  const key = process.env.RUNPOD_API_KEY; delete process.env.RUNPOD_API_KEY; assert.equal(primaryRunpodOn(), false); process.env.RUNPOD_API_KEY = key;
+  delete process.env.ATLAS_LIVE_ENDPOINT; delete process.env.ATLAS_IMAGE_PRIMARY;
 });

@@ -6,8 +6,16 @@ import { galleryRoot, hasSharedAtlasStore } from '@/app/atlas-store';
 // and the FIRST capacity error also asks that endpoint to keep one worker warm for 60 minutes (workersMin 1) so later builds land on a warm GPU; the cron route /api/cron/warm-cooldown
 // puts it back to workersMin 0 (and the original workersMax). Every switch is logged to a small blob so the cost can be read. Needs RUNPOD_API_KEY + ATLAS_BASE_ENDPOINT + ATLAS_BASE_WARM=1.
 
+/** the RunPod image endpoint: the always-warm live endpoint (ATLAS_LIVE_ENDPOINT) or the shared base endpoint (ATLAS_BASE_ENDPOINT) */
+export const imageEndpoint = () => (process.env.ATLAS_LIVE_ENDPOINT?.trim() || process.env.ATLAS_BASE_ENDPOINT?.trim() || '');
+
 export function fallbackConfigured() {
   return process.env.ATLAS_BASE_WARM === '1' && Boolean(process.env.RUNPOD_API_KEY?.trim()) && Boolean(process.env.ATLAS_BASE_ENDPOINT?.trim());
+}
+
+/** founder 10-13: live user images come from OUR Qwen-Image-2512 first (ATLAS_IMAGE_PRIMARY=runpod), Chutes only as the fallback */
+export function primaryRunpodOn() {
+  return process.env.ATLAS_IMAGE_PRIMARY?.trim().toLowerCase() === 'runpod' && Boolean(process.env.RUNPOD_API_KEY?.trim()) && Boolean(imageEndpoint());
 }
 
 export function isCapacityError(error: unknown) {
@@ -72,7 +80,7 @@ export async function coolDownIfDue() {
 
 /** one image from the RunPod base endpoint (async run + status poll); gives up after timeoutMs and cancels the job */
 export async function runpodBaseImage(prompt: string, width: number, height: number, timeoutMs: number) {
-  const endpoint = encodeURIComponent(process.env.ATLAS_BASE_ENDPOINT?.trim() ?? '');
+  const endpoint = encodeURIComponent(imageEndpoint());
   const headers = { Authorization: `Bearer ${process.env.RUNPOD_API_KEY?.trim() ?? ''}`, 'Content-Type': 'application/json' };
   const t0 = Date.now();
   const submit = await fetch(`https://api.runpod.ai/v2/${endpoint}/run`, { method: 'POST', headers, body: JSON.stringify({ input: { prompt, width, height, mode: 'base' } }) });
