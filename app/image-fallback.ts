@@ -18,7 +18,7 @@ export function primaryRunpodOn() {
   return process.env.ATLAS_IMAGE_PRIMARY?.trim().toLowerCase() === 'runpod' && Boolean(process.env.RUNPOD_API_KEY?.trim()) && Boolean(imageEndpoint());
 }
 
-type Workers = { idle: number; ready: number; running: number; initializing: number };
+type Workers = { idle: number; ready: number; running: number; initializing: number; inProgress: number; inQueue: number };
 const healthCache = new Map<string, { at: number; workers: Workers | null }>();
 
 /** worker counts of a RunPod endpoint (cached 5 s, 3 s timeout); null = unknown, and an unknown state never blocks a call */
@@ -29,9 +29,9 @@ export async function endpointWorkers(endpoint: string, apiKey: string): Promise
   try {
     const response = await fetch(`https://api.runpod.ai/v2/${endpoint}/health`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(3000) });
     if (response.ok) {
-      const body = await response.json() as { workers?: Partial<Workers> };
+      const body = await response.json() as { workers?: Partial<Workers>; jobs?: { inProgress?: number; inQueue?: number } };
       const w = body.workers ?? {};
-      workers = { idle: w.idle ?? 0, ready: w.ready ?? 0, running: w.running ?? 0, initializing: w.initializing ?? 0 };
+      workers = { idle: w.idle ?? 0, ready: w.ready ?? 0, running: w.running ?? 0, initializing: w.initializing ?? 0, inProgress: body.jobs?.inProgress ?? 0, inQueue: body.jobs?.inQueue ?? 0 };
     }
   } catch { workers = null; }
   healthCache.set(endpoint, { at: Date.now(), workers });
@@ -42,14 +42,20 @@ export async function endpointWorkers(endpoint: string, apiKey: string): Promise
 export async function liveHasFreeWorker() {
   if (process.env.ATLAS_LIVE_HEALTH_CHECK === '0') return true;
   const workers = await endpointWorkers(imageEndpoint(), process.env.RUNPOD_API_KEY?.trim() ?? '');
-  return workers === null || workers.idle + workers.ready > 0;
+  if (workers === null) return true;
+  // a queue that is not draining (3+ queued, nothing in progress) means the endpoint is stuck: Chutes at once
+  if (workers.inQueue >= 3 && workers.inProgress === 0) return false;
+  // a warm worker that just finished a job reports 'running', not 'idle' (engines 10-13): free when idle/ready, or when more workers are 'running' than jobs are in progress
+  return workers.idle + workers.ready > 0 || workers.running > workers.inProgress;
 }
 
 /** the exploded view is not a user wait (75 s LoRA cap): skip the LoRA when the endpoint has no worker at all or none even starting its first job */
 export async function loraEndpointUsable(endpoint: string, apiKey: string) {
   if (process.env.ATLAS_LIVE_HEALTH_CHECK === '0') return true;
   const workers = await endpointWorkers(endpoint, apiKey);
-  return workers === null || workers.idle + workers.ready + workers.running > 0;
+  if (workers === null) return true;
+  if (workers.inQueue >= 3 && workers.inProgress === 0) return false;
+  return workers.idle + workers.ready + workers.running > 0;
 }
 
 export function isCapacityError(error: unknown) {

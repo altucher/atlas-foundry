@@ -28,7 +28,7 @@ globalThis.fetch = async (url, init) => {
   }
   if (u.startsWith('https://api.runpod.ai/v2/') && u.endsWith('/health')) {
     if (globalThis.__healthThrows) throw new Error('network');
-    return { ok: true, json: async () => ({ workers: globalThis.__workers }) };
+    return { ok: true, json: async () => ({ workers: globalThis.__workers, jobs: globalThis.__jobs ?? { inProgress: 0, inQueue: 0 } }) };
   }
   return realFetch(url, init);
 };
@@ -87,8 +87,18 @@ test('health check: a user job goes to our endpoint only when a worker is idle o
   globalThis.__workers = { idle: 1, ready: 0, running: 0, initializing: 0 };
   assert.equal(await liveHasFreeWorker(), true);
   process.env.ATLAS_LIVE_ENDPOINT = 'live-b';
+  globalThis.__jobs = { inProgress: 2, inQueue: 0 };
   globalThis.__workers = { idle: 0, ready: 0, running: 2, initializing: 0 };
-  assert.equal(await liveHasFreeWorker(), false, 'all workers busy -> Chutes at once');
+  assert.equal(await liveHasFreeWorker(), false, 'all workers busy with a job each -> Chutes at once');
+  process.env.ATLAS_LIVE_ENDPOINT = 'live-b2';
+  globalThis.__jobs = { inProgress: 0, inQueue: 0 };
+  globalThis.__workers = { idle: 0, ready: 0, running: 1, initializing: 0 };
+  assert.equal(await liveHasFreeWorker(), true, 'a warm worker that just finished shows running with no job in progress: free');
+  process.env.ATLAS_LIVE_ENDPOINT = 'live-b3';
+  globalThis.__jobs = { inProgress: 0, inQueue: 17 };
+  globalThis.__workers = { idle: 0, ready: 0, running: 2, initializing: 0 };
+  assert.equal(await liveHasFreeWorker(), false, 'queue not draining (17 queued, none in progress) -> stuck endpoint, Chutes at once');
+  globalThis.__jobs = { inProgress: 0, inQueue: 0 };
   process.env.ATLAS_LIVE_ENDPOINT = 'live-c';
   globalThis.__workers = { idle: 0, ready: 0, running: 0, initializing: 2 };
   assert.equal(await liveHasFreeWorker(), false, 'cold-starting only -> Chutes at once');
