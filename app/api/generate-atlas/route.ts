@@ -6,7 +6,7 @@ import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard'
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
 import { sanitizeSupplierResult } from '@/app/supplier-sanitize';
-import { trimSupplierSchema, VENDOR_OUTPUT_BUDGET } from '@/app/vendor-trim';
+import { trimSupplierSchema, VENDOR_NOTES_BUDGET, VENDOR_OUTPUT_BUDGET } from '@/app/vendor-trim';
 import { auditLooksEmpty, mergeAudits, supplierCount, unsourcedShare, vendorPinStore } from '@/app/vendor-fallback';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText, loraGenerateImage, chutesRemoveText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
@@ -764,11 +764,11 @@ Each note must state the role, exact product/version/time scope, whether the rel
 
 Coverage is an audit ledger, not a confidence performance. Return exactly one coverage entry for every supplied partId. Use sourced when at least one retained relationship is backed by a component-specific source; searched-no-specific-evidence when you searched the avenues above but found no sufficiently specific relationship; and not-applicable only when the item genuinely has no external vendor or IP relationship to research. The summary must briefly state which product-family/current/historical avenues were checked and why evidence was retained or withheld. Never omit a supplied partId.`;
   // OUTPUT TRIM (ATLAS_VENDOR_TRIM=1): vendor output is ~42k tokens = 75% of an explode's cost and the long notes dominate it; same companies and links, shorter notes, at most 4 relationships per component
-  const trim = process.env.ATLAS_VENDOR_TRIM === '1';
-  const instructionsFinal = trim
-    ? `${instructions}${VENDOR_OUTPUT_BUDGET}`
-    : instructions;
-  const schemaFinal = trim ? trimSupplierSchema(supplierResearchSchema, parts.length) : supplierResearchSchema;
+  // ATLAS_VENDOR_TRIM=1: notes + at most 3 relationships per part; =notes: notes/summary caps only (all relationships kept)
+  const trimMode = process.env.ATLAS_VENDOR_TRIM;
+  const trim = trimMode === '1' || trimMode === 'notes';
+  const instructionsFinal = trim ? `${instructions}${trimMode === 'notes' ? VENDOR_NOTES_BUDGET : VENDOR_OUTPUT_BUDGET}` : instructions;
+  const schemaFinal = trim ? trimSupplierSchema(supplierResearchSchema, parts.length, trimMode === 'notes' ? 8 : 3) : supplierResearchSchema;
   report({ stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} · checking ${parts.length} components individually…` });
   // part-specific grounding query for this batch (see tao1StructuredCall)
   const searchQuery = `${atlas.subject} ${parts.slice(0, 3).map((part) => part.name).join(' ')} supplier OR manufacturer OR part number`.slice(0, 300);
