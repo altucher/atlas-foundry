@@ -7,6 +7,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { head, list, put } from '@vercel/blob';
 
 import { galleryRoot, hasSharedAtlasStore } from '@/app/atlas-store';
+import { summarizeCalls, type CostCall } from '@/app/cost-ledger';
 
 export type UsageLine = { stage: string; model: string; provider: string; calls: number; inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; webSearchCalls: number; images: number; usd: number | null };
 export type JobUsage = {
@@ -91,27 +92,60 @@ export async function countActiveJobs() {
 export { refusedSubject } from '@/app/blocked-atlases';
 
 /** reads the durable usage record of each pipeline call (written by finishLedger before the call returns; today's or yesterday's date folder) and sums them */
-export async function usageOfBuilds(buildIds: string[]): Promise<JobUsage> {
-  const builds: JobUsage['builds'] = [];
+export async function usageOfBuilds(buildIds: string[], opts: { explodedDelivered?: boolean } = {}): Promise<JobUsage> {
+  const records: UsageRecord[] = [];
   for (const buildId of buildIds) {
     for (const day of [0, 1]) {
       const date = new Date(Date.now() - day * 86_400_000).toISOString().slice(0, 10);
       try {
         const blob = await head(`${galleryRoot()}/_usage/${date}/${buildId}.json`);
-        const record = await (await fetch(`${blob.url}?t=${Date.now()}`, { cache: 'no-store' })).json() as { phase: string; outcome: string; who: { kind: string; id: string }; usd: number | null; unpriced?: string[]; ms: number; lines: UsageLine[] };
-        builds.push({ buildId, phase: record.phase, outcome: record.outcome, who: record.who, usd: record.usd, unpriced: record.unpriced ?? [], ms: record.ms, lines: record.lines });
+        const record = await (await fetch(`${blob.url}?t=${Date.now()}`, { cache: 'no-store' })).json() as { phase: string; outcome: string; who: { kind: string; id: string }; usd: number | null; unpriced?: string[]; ms: number; lines: UsageLine[]; calls?: CostCall[] };
+        records.push({ buildId, phase: record.phase, outcome: record.outcome, who: record.who, usd: record.usd, unpriced: record.unpriced ?? [], ms: record.ms, lines: record.lines, calls: record.calls });
         break;
       } catch { /* try the other date folder; a call that spent nothing writes no record */ }
     }
   }
-  // BILLING (Master 10-13): totals count ONLY builds that delivered something (a saved draft or a completed enrichment); a build that failed, was not saved or ran out of time bills nothing,
-  // its cost is reported apart in undelivered so the books still show it. A job that failed outright therefore has zero totals.
-  const DELIVERED = new Set(['draft_saved', 'complete']);
-  const delivered = builds.filter((b) => DELIVERED.has(b.outcome));
-  const lines = delivered.flatMap((b) => b.lines);
-  const undeliveredLines = builds.filter((b) => !DELIVERED.has(b.outcome)).flatMap((b) => b.lines);
+  return billableUsage(records, { explodedDelivered: opts.explodedDelivered ?? true });
+}
+
+export type UsageRecord = { buildId: string; phase: string; outcome: string; who: { kind: string; id: string }; usd: number | null; unpriced: string[]; ms: number; lines: UsageLine[]; calls?: CostCall[] };
+
+/** exploded-view work that is only billed when the delivered atlas actually has an exploded view (and then only the final render, not the failed attempts) */
+const EXPLODED_STAGES = new Set(['image-exploded', 'image-text-removal', 'hotspots']);
+const DELIVERED = new Set(['draft_saved', 'complete']);
+
+/**
+ * BILLING (Master 10-13): totals count ONLY what was delivered.
+ *  - a build that failed, was not saved or ran out of time bills nothing (reported in undelivered);
+ *  - exploded-view images (render, text removal, hotspot map) bill nothing when the atlas ships without an exploded view; when it has one, only the LAST render of each stage bills,
+ *    so attempts that failed the QA or were cut are our cost, never the user's.
+ * Pure function (no storage) so it is unit tested.
+ */
+export function billableUsage(records: UsageRecord[], opts: { explodedDelivered: boolean }): JobUsage {
+  const builds: JobUsage['builds'] = records.map((r) => ({ buildId: r.buildId, phase: r.phase, outcome: r.outcome, who: r.who, usd: r.usd, unpriced: r.unpriced, ms: r.ms, lines: r.lines }));
+  const billed: CostCall[] = [];
+  const notBilled: CostCall[] = [];
+  const billedLines: UsageLine[] = [];
+  const notBilledLines: UsageLine[] = [];
+  for (const record of records) {
+    if (!DELIVERED.has(record.outcome)) { if (record.calls) notBilled.push(...record.calls); else notBilledLines.push(...record.lines); continue; }
+    if (record.calls) {
+      const lastOfStage = new Map<string, number>();
+      record.calls.forEach((call, index) => { if (EXPLODED_STAGES.has(call.stage)) lastOfStage.set(call.stage, index); });
+      record.calls.forEach((call, index) => {
+        const exploded = EXPLODED_STAGES.has(call.stage);
+        if (!exploded || (opts.explodedDelivered && lastOfStage.get(call.stage) === index)) billed.push(call); else notBilled.push(call);
+      });
+    } else {
+      for (const line of record.lines) (EXPLODED_STAGES.has(line.stage) && !opts.explodedDelivered ? notBilledLines : billedLines).push(line);
+    }
+  }
+  const fromCalls = summarizeCalls(billed);
+  const lines = [...fromCalls.lines as unknown as UsageLine[], ...billedLines];
+  const out = summarizeCalls(notBilled);
   const sum = (pick: (l: UsageLine) => number) => lines.reduce((t, l) => t + pick(l), 0);
-  const unpriced = [...new Set([...lines.filter((l) => l.usd === null).map((l) => l.model), ...builds.flatMap((b) => b.unpriced)])];
+  const unpriced = [...new Set([...lines.filter((l) => l.usd === null).map((l) => l.model), ...records.flatMap((r) => r.unpriced)])];
+  const undeliveredLines = [...out.lines as unknown as UsageLine[], ...notBilledLines];
   return {
     totals: { inputTokens: sum((l) => l.inputTokens), cachedInputTokens: sum((l) => l.cachedInputTokens), outputTokens: sum((l) => l.outputTokens), reasoningTokens: sum((l) => l.reasoningTokens), webSearchCalls: sum((l) => l.webSearchCalls), images: sum((l) => l.images),
       usd: unpriced.length ? null : Math.round(sum((l) => l.usd ?? 0) * 1e6) / 1e6,
@@ -119,7 +153,7 @@ export async function usageOfBuilds(buildIds: string[]): Promise<JobUsage> {
       prompt_tokens: sum((l) => l.inputTokens), cached_tokens: sum((l) => l.cachedInputTokens), completion_tokens: sum((l) => l.outputTokens + l.reasoningTokens),
       imageUsd: Math.round(sum((l) => (l.images > 0 ? l.usd ?? 0 : 0)) * 1e6) / 1e6 },
     unpriced,
-    undelivered: { builds: builds.filter((b) => !DELIVERED.has(b.outcome)).map((b) => b.buildId), inputTokens: undeliveredLines.reduce((t, l) => t + l.inputTokens, 0), outputTokens: undeliveredLines.reduce((t, l) => t + l.outputTokens + l.reasoningTokens, 0), usd: Math.round(undeliveredLines.reduce((t, l) => t + (l.usd ?? 0), 0) * 1e6) / 1e6 },
+    undelivered: { builds: records.filter((r) => !DELIVERED.has(r.outcome)).map((r) => r.buildId), inputTokens: undeliveredLines.reduce((t, l) => t + l.inputTokens, 0), outputTokens: undeliveredLines.reduce((t, l) => t + l.outputTokens + l.reasoningTokens, 0), usd: Math.round(undeliveredLines.reduce((t, l) => t + (l.usd ?? 0), 0) * 1e6) / 1e6 },
     builds,
   };
 }

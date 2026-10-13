@@ -147,7 +147,7 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
       hasExploded = again.status === 200 && Boolean((again.payload.atlas as { explodedImage?: unknown } | undefined)?.explodedImage);
       if (hasExploded) job.warning = undefined;
     }
-    const usage = await usageOfBuilds(job.buildIds ?? []);
+    const usage = await usageOfBuilds(job.buildIds ?? [], { explodedDelivered: hasExploded });
     await update({ state: 'done', stage: 'done', message: 'Done', usage, finishedAt: new Date().toISOString() }, true);
   } catch (error) {
     console.error('atlas job failed', error);
