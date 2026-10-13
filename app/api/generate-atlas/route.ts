@@ -1475,7 +1475,10 @@ export async function POST(request: Request) {
         vendorFallbackUsed = true;
         const subset = { ...normalizedDraft, parts: normalizedDraft.parts.filter((part) => gaps.has(part.id)) };
         const second = await vendorPinStore.run({ pin: '' }, () => enrichSuppliers({ ...connection, supplierResearchModel: connection.supplierResearchModel }, subset, report)).catch((error) => { console.warn('hybrid re-audit failed', error); return null; });
-        if (second) enriched = mergeAudits(firstEnriched, second as typeof firstEnriched);
+        if (second) {
+          enriched = mergeAudits(firstEnriched, second as typeof firstEnriched);
+          console.warn(`Hybrid supplier audit: first pass ${supplierCount(firstEnriched.parts)} relationships, default-cell pass on ${gaps.size} parts found ${supplierCount(second.parts)}, merged ${supplierCount(enriched.parts)} (parts with a relationship: ${firstEnriched.parts.filter((part) => part.suppliers?.length).length} -> ${enriched.parts.filter((part) => part.suppliers?.length).length})`);
+        }
       }
       const suppliersUnavailable = supplierCount(enriched.parts) < 3;
       report({ stage: 'save', message: 'Publishing the completed supplier and IP edition to the shared gallery…' });
