@@ -13,6 +13,8 @@ export type JobUsage = {
   /** sums over all builds of the job; usd is null when any line is unpriced (then see unpriced[]; the wallet can price the tokens itself) */
   totals: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningTokens: number; webSearchCalls: number; images: number; usd: number | null; prompt_tokens: number; cached_tokens: number; completion_tokens: number; imageUsd: number };
   unpriced: string[];
+  /** cost of builds that delivered nothing (failed / not saved): never billed to the caller */
+  undelivered?: { builds: string[]; inputTokens: number; outputTokens: number; usd: number };
   builds: Array<{ buildId: string; phase: string; outcome: string; who: { kind: string; id: string }; usd: number | null; unpriced: string[]; ms: number; lines: UsageLine[] }>;
 };
 
@@ -102,7 +104,12 @@ export async function usageOfBuilds(buildIds: string[]): Promise<JobUsage> {
       } catch { /* try the other date folder; a call that spent nothing writes no record */ }
     }
   }
-  const lines = builds.flatMap((b) => b.lines);
+  // BILLING (Master 10-13): totals count ONLY builds that delivered something (a saved draft or a completed enrichment); a build that failed, was not saved or ran out of time bills nothing,
+  // its cost is reported apart in undelivered so the books still show it. A job that failed outright therefore has zero totals.
+  const DELIVERED = new Set(['draft_saved', 'complete']);
+  const delivered = builds.filter((b) => DELIVERED.has(b.outcome));
+  const lines = delivered.flatMap((b) => b.lines);
+  const undeliveredLines = builds.filter((b) => !DELIVERED.has(b.outcome)).flatMap((b) => b.lines);
   const sum = (pick: (l: UsageLine) => number) => lines.reduce((t, l) => t + pick(l), 0);
   const unpriced = [...new Set([...lines.filter((l) => l.usd === null).map((l) => l.model), ...builds.flatMap((b) => b.unpriced)])];
   return {
@@ -112,6 +119,7 @@ export async function usageOfBuilds(buildIds: string[]): Promise<JobUsage> {
       prompt_tokens: sum((l) => l.inputTokens), cached_tokens: sum((l) => l.cachedInputTokens), completion_tokens: sum((l) => l.outputTokens + l.reasoningTokens),
       imageUsd: Math.round(sum((l) => (l.images > 0 ? l.usd ?? 0 : 0)) * 1e6) / 1e6 },
     unpriced,
+    undelivered: { builds: builds.filter((b) => !DELIVERED.has(b.outcome)).map((b) => b.buildId), inputTokens: undeliveredLines.reduce((t, l) => t + l.inputTokens, 0), outputTokens: undeliveredLines.reduce((t, l) => t + l.outputTokens + l.reasoningTokens, 0), usd: Math.round(undeliveredLines.reduce((t, l) => t + (l.usd ?? 0), 0) * 1e6) / 1e6 },
     builds,
   };
 }

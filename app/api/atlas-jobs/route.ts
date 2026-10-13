@@ -103,9 +103,19 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
     save: 'Saving the atlas',
   };
   const progress = (stage: string) => { const line = STAGE_LINES[stage]; if (line) void update({ stage, message: line }); };
+  // total time cap (Master 10-13): the job ships what it has well before the 800 s function limit instead of dying with nothing; work still running behind the cap is not billed
+  const capMs = Number(process.env.ATLAS_JOBS_TOTAL_CAP_MS) || 720_000;
+  const capAt = Date.parse(job.startedAt) + capMs;
+  const TIMED_OUT = Symbol('timed out');
+  const within = <T,>(work: Promise<T>): Promise<T | typeof TIMED_OUT> => Promise.race([work, new Promise<typeof TIMED_OUT>((resolve) => setTimeout(() => resolve(TIMED_OUT), Math.max(1000, capAt - Date.now())))]);
   try {
     await update({ state: 'drafting', stage: 'research', message: 'Researching the parts' }, true);
-    const draft = await callPipeline(origin, callerAddress, job.subject, 'draft', who, progress);
+    const draftRun = await within(callPipeline(origin, callerAddress, job.subject, 'draft', who, progress));
+    if (draftRun === TIMED_OUT) {
+      await update({ state: 'failed', error: 'The build ran out of time before an atlas was ready. Nothing was delivered.', finishedAt: new Date().toISOString() }, true);
+      return;
+    }
+    const draft = draftRun;
     if (draft.buildId) job.buildIds = [...(job.buildIds ?? []), draft.buildId];
     if (draft.status !== 200 || !draft.payload.atlas) {
       const usage = await usageOfBuilds(job.buildIds ?? []);
@@ -115,16 +125,24 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
     await update({ state: 'draft_ready', atlasKey: job.id, stage: 'draft', message: 'Ready to open; finding the suppliers', warning: typeof draft.payload.imageWarning === 'string' ? draft.payload.imageWarning.slice(0, 300) : undefined }, true);
     if (draft.payload.enrichmentPending) {
       await update({ state: 'enriching', stage: 'vendor', message: 'Finding the suppliers' }, true);
-      const enrich = await callPipeline(origin, callerAddress, job.subject, 'enrich', who, progress);
+      const enrichRun = capAt - Date.now() < 90_000 ? TIMED_OUT : await within(callPipeline(origin, callerAddress, job.subject, 'enrich', who, progress));
+      if (enrichRun === TIMED_OUT) {
+        job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish in time; the atlas is ready without it.`;
+      } else {
+      const enrich = enrichRun;
       if (enrich.buildId) job.buildIds = [...(job.buildIds ?? []), enrich.buildId];
       if (enrich.status !== 200) job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish: ${String(enrich.payload.error ?? enrich.status).slice(0, 160)}`;
+      }
     }
     // quality first (founder 10-12): an atlas whose exploded view failed the visual QA gets more rounds (each up to 3 renders) before it is left assembled-only
     const rounds = Math.max(0, Number(process.env.ATLAS_JOBS_REEXPLODE_ROUNDS ?? 1) || 0);
     let hasExploded = Boolean((draft.payload.atlas as { explodedImage?: unknown }).explodedImage);
     for (let round = 0; !hasExploded && round < rounds; round += 1) {
       await update({ stage: 'render', message: 'Drawing the exploded view' }, true);
-      const again = await callPipeline(origin, callerAddress, job.subject, 'reexplode', who, progress);
+      if (capAt - Date.now() < 150_000) break;
+      const againRun = await within(callPipeline(origin, callerAddress, job.subject, 'reexplode', who, progress));
+      if (againRun === TIMED_OUT) break;
+      const again = againRun;
       if (again.buildId) job.buildIds = [...(job.buildIds ?? []), again.buildId];
       hasExploded = again.status === 200 && Boolean((again.payload.atlas as { explodedImage?: unknown } | undefined)?.explodedImage);
       if (hasExploded) job.warning = undefined;

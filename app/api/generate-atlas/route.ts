@@ -6,7 +6,7 @@ import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard'
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
-import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho } from '@/app/cost-ledger';
+import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho, ledgerElapsedMs } from '@/app/cost-ledger';
 
 import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
@@ -652,7 +652,7 @@ async function generateResearchWithFallback(
   try {
     return await generateResearchInBackground(connection, body, report, progress);
   } catch (firstError) {
-    if (researchConfigurationFailure(firstError)) throw firstError;
+    if (researchConfigurationFailure(firstError) || /Research budget exceeded/.test(String(firstError))) throw firstError;
     const fallbackId = String(body.model ?? '').includes('terra') ? 'gpt-5.6-luna' : 'gpt-5.6-terra';
     const fallbackModel = connection.baseUrl === 'https://api.openai.com/v1' ? fallbackId : gatewayModel(fallbackId);
     const tools = Array.isArray(body.tools)
@@ -682,7 +682,7 @@ async function generateDraftResearchWithRecovery(
   try {
     return await generateResearchWithFallback(connection, body, report);
   } catch (secondError) {
-    if (researchConfigurationFailure(secondError)) throw secondError;
+    if (researchConfigurationFailure(secondError) || /Research budget exceeded/.test(String(secondError))) throw secondError;
     const finalModel = connection.supplierResearchModel;
     const tools = Array.isArray(body.tools)
       ? body.tools.map((tool) => tool && typeof tool === 'object' && 'type' in tool && tool.type === 'web_search'
@@ -1019,6 +1019,14 @@ function correctionFor(issues: string[], composition: string) {
   return `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${lettering ? 'It contained unreadable or misspelled lettering. Draw ABSOLUTELY NO TEXT: no labels, no captions, no callouts, no map lettering, no numbers, no letters, no logos; every part is a plain unlabeled shape. ' : ''}${rest} ${composition}`;
 }
 
+/** the promise, or a rejection after ms (the work behind it may keep running until the function ends) */
+function raceBudget<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    work.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+  });
+}
+
 async function generateImage(
   connection: AiConnection,
   subject: string,
@@ -1042,7 +1050,10 @@ async function generateImage(
   const orExploded = mode === 'exploded' && Boolean(connection.openrouterKey);
   const strictExploded = mode === 'exploded' && (connection.imageProvider === 'chutes' || orExploded);
   const attempts = (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
+  const explodedBudgetMs = Number(process.env.ATLAS_EXPLODED_BUDGET_MS) || 420_000;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    // the exploded view never holds the atlas back: past its time budget the build ships assembled-only
+    if (mode === 'exploded' && ledgerElapsedMs() > explodedBudgetMs) throw new Error('Exploded view skipped: the time budget was reached.');
     const lastAttempt = attempt === attempts - 1;
     if (orExploded && connection.openrouterKey) {
       const orPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
@@ -1515,7 +1526,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
     const imageResults = await Promise.allSettled([
       generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
         .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin, connection.openrouterKey ? 3 : 1))
+      raceBudget(generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin, connection.openrouterKey ? 3 : 1)), Math.max(1, (Number(process.env.ATLAS_EXPLODED_BUDGET_MS) || 420_000) - ledgerElapsedMs()), 'Exploded view skipped: the time budget was reached.')
         .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
     ]);
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;

@@ -5,7 +5,7 @@
 // Env: TAO1_API_KEY (server only), TAO1_BASE_URL (default https://api.jtao.ai/v1, the API door for internal keys; tao1.ai/v1 is the site's customer-key door and answers 401 to anything else), TAO1_MODEL (default tao-1), ATLAS_TEXT_PROVIDER=tao1 to turn it on.
 import { Agent, fetch as undiciFetch } from 'undici';
 
-import { currentBuildId } from '@/app/cost-ledger';
+import { currentBuildId, ledgerElapsedMs } from '@/app/cost-ledger';
 
 export type Tao1Connection = { baseUrl: string; apiKey: string; model: string };
 
@@ -46,7 +46,10 @@ ${JSON.stringify(schema)}`;
   const messages: Array<{ role: string; content: string }> = [{ role: 'system', content: system }, { role: 'user', content: String(body.input ?? '') }];
   let usage: Tao1Usage = { prompt_tokens: 0, completion_tokens: 0 };
   let lastError = 'unknown';
+  const budgetMs = Number(process.env.ATLAS_RESEARCH_BUDGET_MS) || 600_000;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    // retry budget (Master 10-13): a research call that keeps failing must not burn the whole 800 s function; stop retrying at the budget and fail early with a clear message
+    if (ledgerElapsedMs() > budgetMs) throw new Error(`Research budget exceeded (${Math.round(budgetMs / 1000)} s): ${lastError}`);
     const response = await undiciFetch(`${conn.baseUrl}/chat/completions`, {
       dispatcher,
       method: 'POST',
@@ -64,6 +67,8 @@ ${JSON.stringify(schema)}`;
     usage = { prompt_tokens: (usage.prompt_tokens ?? 0) + (payload.usage?.prompt_tokens ?? 0), completion_tokens: (usage.completion_tokens ?? 0) + (payload.usage?.completion_tokens ?? 0) };
     const content = payload.choices?.[0]?.message?.content ?? '';
     try {
+      // a gateway-salvaged cut answer comes back with finish_reason 'length': it parses but is partial, so it is never accepted as a whole result
+      if (payload.choices?.[0]?.finish_reason === 'length') throw new Error('the reply was cut short (finish_reason length)');
       const parsed = extractJson(content);
       const missing = requiredKeysMissing(parsed, schema);
       if (missing.length) throw new Error(`missing keys: ${missing.join(', ')}`);

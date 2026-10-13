@@ -80,6 +80,12 @@ export function noteLedger(outcome: string) {
   if (ledger) ledger.note = outcome;
 }
 
+/** milliseconds since this request's ledger started (0 outside a ledger); the time budgets in the route and the TAO-1 client read it */
+export function ledgerElapsedMs() {
+  const ledger = storage.getStore();
+  return ledger ? Date.now() - ledger.startedAt : 0;
+}
+
 export function currentBuildId() {
   return storage.getStore()?.buildId ?? null;
 }
