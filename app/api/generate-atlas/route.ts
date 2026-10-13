@@ -13,7 +13,7 @@ import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText, loraGener
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho, ledgerElapsedMs } from '@/app/cost-ledger';
 
-import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery, loadGalleryAtlas } from '@/app/atlas-store';
+import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery, loadGalleryAtlas, galleryRoot } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
 import { canonicalResearchPrompt, subjectMatchesRequest } from '@/app/subject-identity';
 
@@ -1240,7 +1240,32 @@ async function generateImage(
   throw new Error('Image generation exhausted its composition attempts.');
 }
 
+/** ATLAS_DEBUG_QA=1 (diagnosis only): every exploded-view QA verdict is stored with the image it judged, so the rejections can be looked at by eye */
+async function debugKeepQa(image: string, subject: string, verdict: { pass: boolean; issues: string[] }, layoutOnly: boolean) {
+  try {
+    const { put } = await import('@vercel/blob');
+    const base = `${galleryRoot()}/_qa_debug/${cacheKeyForPrompt(subject)}/${Date.now()}-${layoutOnly ? 'layout' : 'strict'}-${verdict.pass ? 'pass' : 'fail'}`;
+    const match = /^data:(image\/[a-z+]+);base64,(.*)$/s.exec(image);
+    if (match) await put(`${base}.${match[1].endsWith('png') ? 'png' : 'jpg'}`, Buffer.from(match[2], 'base64'), { access: 'public', contentType: match[1], addRandomSuffix: false, allowOverwrite: true });
+    await put(`${base}.json`, JSON.stringify({ subject, layoutOnly, pass: verdict.pass, issues: verdict.issues, qaModel: process.env.ATLAS_QA_ONLY_MODEL ?? 'default' }), { access: 'public', contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true });
+  } catch (error) {
+    console.warn('QA debug keep failed', error);
+  }
+}
+
 async function assessGeneratedImage(
+  connection: AiConnection,
+  image: string,
+  subject: string,
+  mode: 'assembled' | 'exploded',
+  layoutOnly = false,
+) {
+  const verdict = await assessGeneratedImageRaw(connection, image, subject, mode, layoutOnly);
+  if (process.env.ATLAS_DEBUG_QA === '1' && mode === 'exploded') await debugKeepQa(image, subject, verdict, layoutOnly);
+  return verdict;
+}
+
+async function assessGeneratedImageRaw(
   connection: AiConnection,
   image: string,
   subject: string,
