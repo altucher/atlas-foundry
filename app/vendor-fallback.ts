@@ -18,3 +18,33 @@ export function auditLooksEmpty(parts: SupplierPart[]) {
   if (supplierCount(parts) < 3) return true;
   return parts.every((part) => part.supplierResearch?.status === 'searched-no-specific-evidence');
 }
+
+type AuditPart = { id: string; suppliers?: unknown[]; supplierResearch?: unknown };
+type AuditAtlas = { parts: AuditPart[]; sources: Array<{ url?: string; id?: string }> };
+
+/** the share of parts that ended with no retained relationship */
+export function unsourcedShare(parts: SupplierPart[]) {
+  if (!parts.length) return 0;
+  return parts.filter((part) => !(Array.isArray(part.suppliers) && part.suppliers.length)).length / parts.length;
+}
+
+/**
+ * HYBRID (flash first, K3 for the gaps): take the cheap pass, then replace ONLY the parts it left without a relationship by what the default cell found for them (when it found any).
+ * Sources are the union by url (relationships cite urls, not source ids), ids renumbered. Pure, tested.
+ */
+export function mergeAudits<A extends AuditAtlas>(first: A, second: A): A {
+  const byId = new Map(second.parts.map((part) => [part.id, part]));
+  const parts = first.parts.map((part) => {
+    if (Array.isArray(part.suppliers) && part.suppliers.length) return part;
+    const other = byId.get(part.id);
+    return other && Array.isArray(other.suppliers) && other.suppliers.length ? { ...part, suppliers: other.suppliers, supplierResearch: other.supplierResearch } : part;
+  });
+  const seen = new Set<string>();
+  const sources = [...first.sources, ...second.sources].filter((source) => {
+    const key = source.url ?? '';
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((source, index) => ({ ...source, id: `source-${index + 1}` }));
+  return { ...first, parts, sources };
+}

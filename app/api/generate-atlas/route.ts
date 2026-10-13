@@ -6,7 +6,7 @@ import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard'
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
 import { sanitizeSupplierResult } from '@/app/supplier-sanitize';
-import { auditLooksEmpty, supplierCount, vendorPinStore } from '@/app/vendor-fallback';
+import { auditLooksEmpty, mergeAudits, supplierCount, unsourcedShare, vendorPinStore } from '@/app/vendor-fallback';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText, loraGenerateImage, chutesRemoveText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho, ledgerElapsedMs } from '@/app/cost-ledger';
@@ -1467,6 +1467,15 @@ export async function POST(request: Request) {
         console.warn(`Supplier audit empty on the pinned cell (${supplierCount(firstEnriched.parts)} relationships); re-running on the default cell`);
         vendorFallbackUsed = true;
         enriched = await vendorPinStore.run({ pin: '' }, () => enrichSuppliers({ ...connection, supplierResearchModel: connection.supplierResearchModel }, normalizedDraft, report));
+      } else if (process.env.ATLAS_VENDOR_ONLY_MODEL?.trim() && unsourcedShare(firstEnriched.parts) > (Number(process.env.ATLAS_VENDOR_HYBRID_THRESHOLD) || 0.3)) {
+        // hybrid: the cheap pass left too many parts without a relationship; only THOSE parts are audited again on the default cell and merged in
+        const gaps = new Set(firstEnriched.parts.filter((part) => !(part.suppliers && part.suppliers.length)).map((part) => part.id));
+        report({ stage: 'vendor', message: `Re-checking ${gaps.size} components the first supplier pass could not source…` });
+        console.warn(`Supplier audit thin on the pinned cell (${gaps.size} of ${firstEnriched.parts.length} parts unsourced); auditing those on the default cell`);
+        vendorFallbackUsed = true;
+        const subset = { ...normalizedDraft, parts: normalizedDraft.parts.filter((part) => gaps.has(part.id)) };
+        const second = await vendorPinStore.run({ pin: '' }, () => enrichSuppliers({ ...connection, supplierResearchModel: connection.supplierResearchModel }, subset, report)).catch((error) => { console.warn('hybrid re-audit failed', error); return null; });
+        if (second) enriched = mergeAudits(firstEnriched, second as typeof firstEnriched);
       }
       const suppliersUnavailable = supplierCount(enriched.parts) < 3;
       report({ stage: 'save', message: 'Publishing the completed supplier and IP edition to the shared gallery…' });
