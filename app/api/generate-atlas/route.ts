@@ -14,7 +14,7 @@ import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText, loraGener
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho, ledgerElapsedMs } from '@/app/cost-ledger';
 
-import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery, loadGalleryAtlas, galleryRoot } from '@/app/atlas-store';
+import { cacheKeyForPrompt, loadAtlasDraft, loadCachedAtlas, saveAtlasDraft, saveAtlasToGallery, saveExplodedView, loadGalleryAtlas, galleryRoot } from '@/app/atlas-store';
 import { CURRENT_INTELLIGENCE_VERSION, type AtlasHotspot, type AtlasPart, type AtlasSource, type FoundryAtlas } from '@/app/foundry-data';
 import { canonicalResearchPrompt, subjectMatchesRequest } from '@/app/subject-identity';
 
@@ -1519,10 +1519,9 @@ export async function POST(request: Request) {
       report({ stage: 'render', message: 'Rendering the exploded view again…' });
       const explodedImage = await generateImage(connection, saved.subject, '', 'exploded', saved.parts, saved.imageOrientation ?? 'landscape', 3);
       const hotspots = await locateHotspots(connection, explodedImage, saved.parts).catch(() => fallbackHotspots(saved.parts));
-      // the suppliers pass may have saved a newer copy while this render ran: merge the exploded view into the FRESHEST copy instead of overwriting it with the one loaded at the start
-      const fresh = (await loadGalleryAtlas(promptCacheKey)) ?? (await loadAtlasDraft(promptCacheKey)) ?? saved;
-      const save = fresh.buildStage === 'complete' ? saveAtlasToGallery : saveAtlasDraft;
-      const atlas = await save({ ...fresh, explodedImage, explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${saved.subject}`, hotspots, buildCost: mergeBuildCost(fresh.buildCost, summarizeLedger()) }, prompt);
+      // the exploded view is saved as its OWN record (exploded.json) and merged in by every reader; atlas.json / draft.json are never rewritten from here (a stale CDN copy of them could drop the supplier pass's data)
+      const fresh = (await loadGalleryAtlas(promptCacheKey)) ?? saved;
+      const atlas = await saveExplodedView(fresh, prompt, { explodedImage, explodedImageAlt: `Photorealistic AI-generated conceptual exploded view of ${saved.subject}`, hotspots });
       report({ stage: 'done', message: 'Exploded view added.' });
       return NextResponse.json({ atlas, cached: false, reexploded: true });
     } catch (error) {

@@ -9,7 +9,7 @@ const root = process.env.ROOT ?? process.cwd();
 const out = path.join(root, 'node_modules', `.atlas-store-test-${process.pid}.mjs`);
 const stub = `const S = (globalThis.__blobs ??= new Map());
   export const head = async (p) => { const v = S.get(p); if (!v) throw new Error('not found'); return { url: 'mem://' + p, uploadedAt: new Date(v.at), size: v.body.length }; };
-  export const put = async (p, body) => { const old = S.get(p); S.set(p, { body: typeof body === 'string' ? body : Buffer.from(body).toString('latin1'), prev: old?.body, at: (old?.at ?? 1000) + 1000 }); return { url: 'mem://' + p }; };
+  export const put = async (p, body) => { const old = S.get(p); S.set(p, { body: typeof body === 'string' ? body : Buffer.from(body).toString('latin1'), prev: old?.body, at: (old?.at ?? 1000) + 1000 }); return { url: 'https://mem.blob/' + p }; };
   export const list = async () => ({ blobs: [], hasMore: false });`;
 await build({ entryPoints: [path.join(root, 'app/atlas-store.ts')], bundle: true, platform: 'node', format: 'esm', outfile: out, logLevel: 'error', external: [],
   plugins: [{ name: 'blob', setup(b) { b.onResolve({ filter: /^@vercel\/blob$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: stub, loader: 'js' })); } }] });
@@ -18,12 +18,12 @@ globalThis.__blobs ??= new Map();
 const realFetch = globalThis.fetch;
 // the CDN: a path listed in __stale serves the PREVIOUS body (the bug); a ?v=<uploadedAt> fetch of a record never read before is fresh
 globalThis.fetch = async (url) => {
-  const u = String(url); if (!u.startsWith('mem://')) return realFetch(url);
-  const p = u.slice(6).split('?')[0]; const v = globalThis.__blobs.get(p); if (!v) return { ok: false };
+  const u = String(url); if (!u.startsWith('mem://') && !u.startsWith('https://mem.blob/')) return realFetch(url);
+  const p = u.replace(/^mem:\/\/|^https:\/\/mem\.blob\//, '').split('?')[0]; const v = globalThis.__blobs.get(p); if (!v) return { ok: false };
   const body = globalThis.__stale?.has(p) && v.prev !== undefined ? v.prev : v.body;
   return { ok: true, json: async () => JSON.parse(body) };
 };
-const { saveAtlasDraft, saveAtlasToGallery, loadCachedAtlas, loadAtlasDraft, loadGalleryAtlas } = await import(pathToFileURL(out).href);
+const { saveAtlasDraft, saveAtlasToGallery, saveExplodedView, loadCachedAtlas, loadAtlasDraft, loadGalleryAtlas } = await import(pathToFileURL(out).href);
 const base = (extra = {}) => ({ subject: 'Unit Widget', subtitle: 's', category: 'c', summary: 'x', accuracyNote: 'a', parts: [], sources: [], image: 'https://blob/unit/assembled.png', imageAlt: 'i', explodedImageAlt: 'alt', imageOrientation: 'landscape', mode: 'generated', generatedAt: '2026-10-13T00:00:00Z', ...extra });
 const reset = () => { globalThis.__blobs.clear(); globalThis.__stale = new Set(); };
 globalThis.__stale = new Set();
@@ -51,4 +51,25 @@ test('the sidecar is written only for a real (stored) exploded image URL', async
   reset(); await saveAtlasDraft(base({ explodedImage: undefined }), 'Unit Widget');
   assert.equal(globalThis.__blobs.has('atlas-foundry/unit/unit-widget/exploded.json'), false);
   await saveAtlasDraft(base(EX), 'Unit Widget'); assert.equal(globalThis.__blobs.has('atlas-foundry/unit/unit-widget/exploded.json'), true);
+});
+
+test('saveExplodedView never rewrites atlas.json or draft.json (a stale CDN copy of them must not be resurrected): only exploded.json is written, and readers merge it in', async () => {
+  reset();
+  const supplied = base({ generatedAt: '2026-10-13T00:03:00Z', parts: [{ id: 'p1', name: 'Part', suppliers: [{ company: 'Acme' }] }] });
+  await saveAtlasDraft(base(), 'Unit Widget'); await saveAtlasToGallery(supplied, 'Unit Widget');
+  const before = { atlas: globalThis.__blobs.get('atlas-foundry/unit/unit-widget/atlas.json').body, draft: globalThis.__blobs.get('atlas-foundry/unit/unit-widget/draft.json').body };
+  const stale = base(); // what a stale CDN read would hand the exploded step: the draft-time copy WITHOUT the suppliers
+  const merged = await saveExplodedView(stale, 'Unit Widget', { explodedImage: 'data:image/png;base64,AAAA', explodedImageAlt: 'alt', hotspots: { a: 1 } });
+  assert.equal(globalThis.__blobs.get('atlas-foundry/unit/unit-widget/atlas.json').body, before.atlas, 'atlas.json untouched');
+  assert.equal(globalThis.__blobs.get('atlas-foundry/unit/unit-widget/draft.json').body, before.draft, 'draft.json untouched');
+  assert.ok(globalThis.__blobs.has('atlas-foundry/unit/unit-widget/exploded.json') && globalThis.__blobs.has('atlas-foundry/unit/unit-widget/exploded.png'), [...globalThis.__blobs.keys()].join(' '));
+  assert.match(merged.explodedImage, /exploded\.png$/);
+  const loaded = await loadGalleryAtlas('unit-widget');
+  assert.equal(loaded.explodedImage, merged.explodedImage, 'the reader merges the exploded record in'); assert.equal(loaded.parts[0].suppliers[0].company, 'Acme', 'and the supplier data the supplier pass saved is still there');
+});
+test('route guard: the reexplode step saves through saveExplodedView only (no saveAtlasToGallery / saveAtlasDraft inside it)', async () => {
+  const fs = await import('node:fs'); const src = fs.readFileSync(path.join(root, 'app/api/generate-atlas/route.ts'), 'utf8');
+  const block = src.slice(src.indexOf("if (phase === 'reexplode') {"), src.indexOf("if (phase === 'enrich') {"));
+  assert.ok(block.length > 200 && /saveExplodedView\(/.test(block));
+  assert.doesNotMatch(block, /saveAtlasToGallery|saveAtlasDraft/);
 });

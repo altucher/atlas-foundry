@@ -52,11 +52,25 @@ function explodedSidecarPath(cacheKey: string) {
 
 type ExplodedSidecar = { explodedImage: string; explodedImageAlt?: string; hotspots?: unknown };
 
-async function writeExplodedSidecar(cacheKey: string, atlas: { explodedImage?: string; explodedImageAlt?: string; hotspots?: unknown }) {
+async function writeExplodedSidecar(cacheKey: string, atlas: { explodedImage?: string; explodedImageAlt?: string; hotspots?: unknown }, strict = false) {
   if (!atlas.explodedImage || !/^https?:\/\//.test(atlas.explodedImage)) return;
   const record: ExplodedSidecar = { explodedImage: atlas.explodedImage, explodedImageAlt: atlas.explodedImageAlt, hotspots: atlas.hotspots };
-  await put(explodedSidecarPath(cacheKey), JSON.stringify(record), { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json', cacheControlMaxAge: 60 })
-    .catch((error) => console.warn('exploded sidecar write failed', error instanceof Error ? error.message : error));
+  const write = put(explodedSidecarPath(cacheKey), JSON.stringify(record), { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json', cacheControlMaxAge: 60 });
+  if (strict) await write; else await write.catch((error) => console.warn('exploded sidecar write failed', error instanceof Error ? error.message : error));
+}
+
+/**
+ * The exploded step's save: stores the exploded image and ITS OWN record (exploded.json) and returns the atlas with the exploded view merged in. It never rewrites atlas.json or draft.json: the CDN can
+ * serve a stale copy of an overwritten record for many minutes (query strings and headers do not bypass it), so a read-modify-write of those records from here could resurrect an old copy and drop
+ * what the supplier pass saved (suppliers, sources). Readers (loadCachedAtlas / loadAtlasDraft) merge this record in.
+ */
+export async function saveExplodedView(base: FoundryAtlas, prompt: string, exploded: { explodedImage: string; explodedImageAlt: string; hotspots: unknown }) {
+  if (!hasSharedAtlasStore()) return { ...base, ...exploded } as FoundryAtlas;
+  const cacheKey = cacheKeyForPrompt(prompt);
+  const explodedImage = await persistImage(cacheKey, 'exploded', exploded.explodedImage);
+  if (!explodedImage) throw new Error('The exploded image could not be stored.');
+  await writeExplodedSidecar(cacheKey, { explodedImage, explodedImageAlt: exploded.explodedImageAlt, hotspots: exploded.hotspots }, true);
+  return { ...base, explodedImage, explodedImageAlt: exploded.explodedImageAlt, hotspots: exploded.hotspots } as FoundryAtlas;
 }
 
 /** an atlas without an exploded view gets it from the sidecar when one exists (an atlas that has one is returned unchanged) */
