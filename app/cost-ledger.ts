@@ -103,8 +103,10 @@ function priceTable(): Record<string, Price> {
   }
 }
 
-function callUsd(call: Omit<CostCall, 'usd'>): number | null {
-  const price = priceTable()[call.model];
+/** the price of one call. A TAO-1 gateway call is priced at the tao-1 list entry whatever cell actually served it (only_model pins such as openrouter/deepseek/deepseek-v4.1-flash are our routing choice, the user pays tao-1 list); without that, a pinned cell had no price entry, the line was 'unpriced' and the total came out null (billed as 0). */
+export function callUsd(call: Omit<CostCall, 'usd'>): number | null {
+  const table = priceTable();
+  const price = table[call.model] ?? (call.provider === 'tao1' ? table['tao-1'] : undefined);
   if (!price) return null;
   const usd = ((call.inputTokens - call.cachedInputTokens) * (price.in ?? 0) + call.cachedInputTokens * (price.cachedIn ?? price.in ?? 0) + call.outputTokens * (price.out ?? 0)) / 1e6
     + (call.webSearchCalls * (price.search ?? 0)) / 1000
