@@ -93,6 +93,12 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
       await update({ usage, state: 'failed', error: String(draft.payload.error ?? `The build failed (${draft.status}).`).slice(0, 300), finishedAt: new Date().toISOString() }, true);
       return;
     }
+    // a draft that could not be SAVED (no matched image pair: the image service was at capacity) is not an atlas: say so instead of finishing 'done' with an atlasKey that opens nothing
+    if (typeof draft.payload.cacheWarning === 'string' && draft.payload.cacheWarning) {
+      const usage = await usageOfBuilds(job.buildIds ?? [], { explodedDelivered: false });
+      await update({ usage, state: 'failed', error: 'The image service is busy right now, so the atlas could not be built. Nothing was charged; please try again in a few minutes.', finishedAt: new Date().toISOString() }, true);
+      return;
+    }
     await update({ state: 'draft_ready', atlasKey: job.id, stage: 'draft', message: 'Ready to open; finding the suppliers', warning: typeof draft.payload.imageWarning === 'string' ? draft.payload.imageWarning.slice(0, 300) : undefined }, true);
     const tailAsync = loraAsyncOn() || process.env.ATLAS_JOBS_TAIL === '1';
     const hasExploded0 = Boolean((draft.payload.atlas as { explodedImage?: unknown }).explodedImage);
