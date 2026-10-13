@@ -1061,6 +1061,17 @@ function correctionFor(issues: string[], composition: string) {
   return `\n\nMANDATORY CORRECTION: the prior candidate was rejected by visual QA. ${lettering ? 'It contained unreadable or misspelled lettering. Draw ABSOLUTELY NO TEXT: no labels, no captions, no callouts, no map lettering, no numbers, no letters, no logos; every part is a plain unlabeled shape. ' : ''}${rest} ${composition}`;
 }
 
+/** an "intact product / assembled copy beside the parts" rejection: say what to draw instead of what to avoid (the LoRA runs at cfg 1, so a negative prompt would be ignored) */
+function positiveRetry(issues: string[]) {
+  const assembledCopy = issues.some((issue) => /(complete|intact|fully assembled|assembled).{0,70}(dominat|beside|next to|alongside|sits|shown|occupies|reference|copy|panel|duplicate|second|joined)|(second|two|duplicate|side-by-side).{0,40}(copy|panel|assembled|mixer|unit)|not (shown )?(in an )?exploded|only (two|a few) (small )?fragments|remain(s)? joined/i.test(issue));
+  return assembledCopy
+    ? '\n\nMANDATORY CORRECTION: draw ONLY the individual separated components, each floating apart in an exploded arrangement across the whole frame. The finished product does not appear anywhere in the image: no complete product, no assembled body, no reference copy, no second panel, not even small or in the background. Every visible object is a single detached part.'
+    : null;
+}
+function correctionOrPositive(issues: string[], composition: string) {
+  return positiveRetry(issues) ?? correctionFor(issues, composition);
+}
+
 const EXPLODED_DEFERRED = 'Exploded view deferred: rendered after the atlas is ready.';
 
 /** the promise, or a rejection after ms (the work behind it may keep running until the function ends) */
@@ -1090,6 +1101,15 @@ async function generateImage(
     : `Create the matching exhaustive exploded-view companion in the same camera angle, scale, backdrop, lighting, and materials. CRITICAL COMPOSITION RULE: depict the parts from exactly one product, with the product fully disassembled. There must be ZERO intact or usable assembled copies of the product anywhere in the image. Do not add a reference product, second product, comparison view, inset, duplicated display/screen, or side-by-side assembled object. Separate the outer shell, display or cover, input surfaces, internal boards, battery or power system, structural pieces, and connectors so no combination still reads as an intact product. Distribute the components broadly and evenly across the useful canvas; do not gather them into a central pile. Pull every documented component below into a distinct, generously separated, non-overlapping visual cluster. Preserve meaningful nested assemblies and repeated parts such as engine clusters, landing legs, wheels, or fairing halves. For infrastructure and generic systems, arrange the clusters so the operating topology remains readable from inputs and utilities through distribution, equipment, data paths, cooling, controls, safety systems, and outputs. Show every listed component once, preserve plausible relative scale, and fit the entire arrangement in frame. Do not invent proprietary internals; represent uncertain items only at the assembly level supported by public evidence.\n\nDocumented components:\n${componentList}`;
 
   let retryDirection = '';
+  // last resort (founder 10-13): when every strict attempt fails, the best image that still shows clearly separated parts (one assembled reference copy allowed, never faint line art) ships instead of no exploded view
+  const keep: { image?: string; issues: number } = { issues: 99 };
+  const noteLastResort = async (image: string, issues: string[]) => {
+    if (mode !== 'exploded' || process.env.ATLAS_EXPLODED_LASTRESORT === '0') return;
+    try {
+      const relaxed = await assessGeneratedImage(connection, image, subject, mode, false, 'relaxed');
+      if (relaxed.pass && issues.length < keep.issues) { keep.image = image; keep.issues = issues.length; }
+    } catch (error) { console.warn('Relaxed exploded QA unavailable', error); }
+  };
   // Chutes exploded views are strict (Master 10-12): live clicks make 1 attempt (a person is waiting); prebuild/background builds (admin header x-atlas-exploded-attempts, 1-3) retry, the QA must pass, and an exploded image that never passes is left out (the atlas then shows the inventory view)
   const loraExploded = mode === 'exploded' && Boolean(connection.lora);
   const orExploded = mode === 'exploded' && Boolean(connection.openrouterKey);
@@ -1104,7 +1124,7 @@ async function generateImage(
   const explodedBudgetMs = Number(process.env.ATLAS_EXPLODED_BUDGET_MS) || 420_000;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     // the exploded view never holds the atlas back: past its time budget the build ships assembled-only
-    if (mode === 'exploded' && ledgerElapsedMs() > explodedBudgetMs) throw new Error('Exploded view skipped: the time budget was reached.');
+    if (mode === 'exploded' && ledgerElapsedMs() > explodedBudgetMs) { if (keep.image) return keep.image; throw new Error('Exploded view skipped: the time budget was reached.'); }
     const lastAttempt = attempt === attempts - 1;
     if (loraExploded && connection.lora && !loraOff && loraFallback && (attempt >= loraAttempts || Date.now() - loraStart > loraBudgetMs)) loraOff = true;
     if (loraExploded && connection.lora && !loraOff) {
@@ -1118,8 +1138,9 @@ async function generateImage(
         // judge the LAYOUT first (the open model paints pseudo-text), then remove all lettering with an open-weight edit model and run the full strict QA on what a person will see
         const layout = await assessGeneratedImage(connection, generated.dataUrl, subject, mode, true);
         if (!layout.pass) {
-          if (loraLast) { if (loraFallback) { loraOff = true; continue; } throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${layout.issues.join(' ').slice(0, 200)}`); }
-          retryDirection = correctionFor(layout.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
+          await noteLastResort(generated.dataUrl, layout.issues);
+          if (loraLast) { if (loraFallback) { loraOff = true; continue; } if (keep.image) return keep.image; throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${layout.issues.join(' ').slice(0, 200)}`); }
+          retryDirection = correctionOrPositive(layout.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
           continue;
         }
         let finalImage = generated.dataUrl;
@@ -1129,8 +1150,9 @@ async function generateImage(
         }
         const strict = await assessGeneratedImage(connection, finalImage, subject, mode);
         if (strict.pass) return finalImage;
-        if (loraLast) { if (loraFallback) { loraOff = true; continue; } throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${strict.issues.join(' ').slice(0, 200)}`); }
-        retryDirection = correctionFor(strict.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
+        await noteLastResort(finalImage, strict.issues);
+        if (loraLast) { if (loraFallback) { loraOff = true; continue; } if (keep.image) return keep.image; throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${strict.issues.join(' ').slice(0, 200)}`); }
+        retryDirection = correctionOrPositive(strict.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
       } catch (error) {
         if (/did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
         console.warn('LoRA exploded QA unavailable', error);
@@ -1147,7 +1169,7 @@ async function generateImage(
         const assessment = await assessGeneratedImage(connection, generated.dataUrl, subject, mode);
         if (assessment.pass) return generated.dataUrl;
         if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${assessment.issues.join(' ').slice(0, 200)}`);
-        retryDirection = correctionFor(assessment.issues, 'Recompose from scratch with no intact product anywhere in the frame.');
+        retryDirection = correctionOrPositive(assessment.issues, 'Recompose from scratch with no intact product anywhere in the frame.');
       } catch (error) {
         if (/did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
         console.warn('Image composition QA unavailable', error);
@@ -1191,8 +1213,9 @@ async function generateImage(
       try {
         const assessment = await assessGeneratedImage(connection, image, subject, mode);
         if (assessment.pass || (lastAttempt && !strictExploded)) return image;
-        if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${assessment.issues.join(' ').slice(0, 200)}`);
-        retryDirection = correctionFor(assessment.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
+        await noteLastResort(image, assessment.issues);
+        if (lastAttempt) { if (keep.image) return keep.image; throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${assessment.issues.join(' ').slice(0, 200)}`); }
+        retryDirection = correctionOrPositive(assessment.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
       } catch (error) {
         if (strictExploded && /did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
         console.warn('Image composition QA unavailable', error);
@@ -1241,13 +1264,13 @@ async function generateImage(
 }
 
 /** ATLAS_DEBUG_QA=1 (diagnosis only): every exploded-view QA verdict is stored with the image it judged, so the rejections can be looked at by eye */
-async function debugKeepQa(image: string, subject: string, verdict: { pass: boolean; issues: string[] }, layoutOnly: boolean) {
+async function debugKeepQa(image: string, subject: string, verdict: { pass: boolean; issues: string[] }, layoutOnly: boolean, rule: string) {
   try {
     const { put } = await import('@vercel/blob');
-    const base = `${galleryRoot()}/_qa_debug/${cacheKeyForPrompt(subject)}/${Date.now()}-${layoutOnly ? 'layout' : 'strict'}-${verdict.pass ? 'pass' : 'fail'}`;
+    const base = `${galleryRoot()}/_qa_debug/${cacheKeyForPrompt(subject)}/${Date.now()}-${rule === 'relaxed' ? 'relaxed' : layoutOnly ? 'layout' : 'strict'}-${verdict.pass ? 'pass' : 'fail'}`;
     const match = /^data:(image\/[a-z+]+);base64,([\s\S]*)$/.exec(image);
     if (match) await put(`${base}.${match[1].endsWith('png') ? 'png' : 'jpg'}`, Buffer.from(match[2], 'base64'), { access: 'public', contentType: match[1], addRandomSuffix: false, allowOverwrite: true });
-    await put(`${base}.json`, JSON.stringify({ subject, layoutOnly, pass: verdict.pass, issues: verdict.issues, qaModel: process.env.ATLAS_QA_ONLY_MODEL ?? 'default' }), { access: 'public', contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true });
+    await put(`${base}.json`, JSON.stringify({ subject, layoutOnly, rule, pass: verdict.pass, issues: verdict.issues, qaModel: process.env.ATLAS_QA_ONLY_MODEL ?? 'default' }), { access: 'public', contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true });
   } catch (error) {
     console.warn('QA debug keep failed', error);
   }
@@ -1259,9 +1282,10 @@ async function assessGeneratedImage(
   subject: string,
   mode: 'assembled' | 'exploded',
   layoutOnly = false,
+  rule: 'strict' | 'relaxed' = 'strict',
 ) {
-  const verdict = await assessGeneratedImageRaw(connection, image, subject, mode, layoutOnly);
-  if (process.env.ATLAS_DEBUG_QA === '1' && mode === 'exploded') await debugKeepQa(image, subject, verdict, layoutOnly);
+  const verdict = await assessGeneratedImageRaw(connection, image, subject, mode, layoutOnly, rule);
+  if (process.env.ATLAS_DEBUG_QA === '1' && mode === 'exploded') await debugKeepQa(image, subject, verdict, layoutOnly, rule);
   return verdict;
 }
 
@@ -1271,6 +1295,7 @@ async function assessGeneratedImageRaw(
   subject: string,
   mode: 'assembled' | 'exploded',
   layoutOnly = false,
+  rule: 'strict' | 'relaxed' = 'strict',
 ) {
   const schema = {
     type: 'object',
@@ -1282,7 +1307,8 @@ async function assessGeneratedImageRaw(
     },
   } as const;
   const layoutRule = 'Pass only when no complete intact assembled product is shown (neither dominating the frame nor beside the parts), the visible pieces all belong to one disassembled subject, and components are distinct and distributed across the useful frame rather than piled at its center. Repeated parts and repeated sub-assemblies are allowed. IGNORE any text, lettering, labels, numbers or pseudo-text completely: they are removed later and must not affect the verdict. Judge only the exploded LAYOUT.';
-  const passRule = layoutOnly && mode === 'exploded' ? layoutRule : mode === 'assembled'
+  const relaxedRule = 'Pass only when the components of ONE disassembled subject are clearly separated and spread across the frame (at least six distinct separated parts) and are drawn with solid visible detail and contrast. ONE assembled reference copy of the subject shown beside the parts is ACCEPTABLE. Fail when the image is faint, pale, thin or sketchy line art, when the subject is not identifiable, when the parts are not clearly separated from each other, or when there are several assembled copies or side-by-side panels.';
+  const passRule = rule === 'relaxed' && mode === 'exploded' ? relaxedRule : layoutOnly && mode === 'exploded' ? layoutRule : mode === 'assembled'
     ? 'Pass only when exactly one intact subject is shown, it is fully visible, it occupies most of the useful frame, and there is no second copy, exploded arrangement, inset, or excessive empty border.'
     : 'Pass only when no complete intact assembled product is shown (neither dominating the frame nor beside the parts), the visible pieces all belong to one disassembled subject, components are distinct and distributed across the useful frame rather than piled at its center. Repeated parts and repeated sub-assemblies are allowed. FAIL when the image contains visible text, labels, letters or numbers that are garbled, misspelled, irrelevant or illegible; legible and correct labels are acceptable.';
   const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a complete reference copy merely because other parts are exploded.`
