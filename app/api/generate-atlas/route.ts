@@ -6,6 +6,7 @@ import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard'
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
 import { sanitizeSupplierResult } from '@/app/supplier-sanitize';
+import { escalateWarm, fallbackConfigured, isCapacityError, runpodBaseImage } from '@/app/image-fallback';
 import { trimSupplierSchema, VENDOR_OUTPUT_BUDGET } from '@/app/vendor-trim';
 import { auditLooksEmpty, mergeAudits, supplierCount, unsourcedShare, vendorPinStore } from '@/app/vendor-fallback';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText, loraGenerateImage, chutesRemoveText } from '@/app/tao1-image';
@@ -1153,7 +1154,17 @@ async function generateImage(
       const chutesPrompt = mode === 'exploded'
         ? `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere, no text, no labels. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`
         : `${sharedDirection} ${modeDirection}${chutesDirection}${retryDirection}`;
-      const generated = await chutesGenerateImage(connection.chutesKey, chutesPrompt, imageOrientation === 'portrait' ? 'portrait' : 'landscape');
+      // Chutes at capacity (429/500): the ASSEMBLED image falls back to our own RunPod base endpoint, and the first such error asks it to stay warm for an hour (see app/image-fallback.ts)
+      const chutesTry: Awaited<ReturnType<typeof chutesGenerateImage>> | Error = await chutesGenerateImage(connection.chutesKey, chutesPrompt, imageOrientation === 'portrait' ? 'portrait' : 'landscape').catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+      let generated: Awaited<ReturnType<typeof chutesGenerateImage>>;
+      if (chutesTry instanceof Error) {
+        if (mode === 'assembled' && fallbackConfigured() && isCapacityError(chutesTry)) {
+          void escalateWarm(`chutes: ${chutesTry.message.slice(0, 120)}`);
+          console.warn('Chutes at capacity: assembled image falls back to the RunPod base endpoint');
+          const alt = await runpodBaseImage(chutesPrompt.slice(0, 1800), imageOrientation === 'portrait' ? 1024 : 1280, imageOrientation === 'portrait' ? 1280 : 864, Math.max(60_000, Math.min(240_000, 700_000 - ledgerElapsedMs())));
+          generated = { model: 'runpod/qwen-image-2512+lightning', dataUrl: alt.dataUrl, mime: 'image/png', bytes: alt.dataUrl.length, ms: alt.ms, sourceUrl: 'runpod', usage: null, width: null, height: null };
+        } else throw chutesTry;
+      } else generated = chutesTry;
       recordImage(`image-${mode}`, generated.model, { usage: undefined }, { size: generated.width && generated.height ? `${generated.width}x${generated.height}` : undefined, quality: 'chutes', provider: 'other', ms: generated.ms });
       const image = generated.dataUrl;
       try {
