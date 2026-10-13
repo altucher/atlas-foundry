@@ -1,4 +1,5 @@
 import { POST as generateAtlas } from '@/app/api/generate-atlas/route';
+import { usageOfBuilds, writeJob, type JobRecord } from '@/app/atlas-jobs';
 
 export type StreamResult = { status: number; payload: Record<string, unknown>; buildId?: string };
 
@@ -45,4 +46,59 @@ export function warmLoraEndpoint() {
 /** the LoRA exploded view runs as its own follow-up function after the job is done (set ATLAS_LORA_ASYNC=0 to render it inside the job instead) */
 export function loraAsyncOn() {
   return process.env.ATLAS_EXPLODED_PROVIDER?.trim().toLowerCase() === 'lora' && Boolean(process.env.ATLAS_LORA_ENDPOINT?.trim()) && Boolean(process.env.RUNPOD_API_KEY?.trim()) && process.env.ATLAS_LORA_ASYNC !== '0';
+}
+
+const STAGE_LINES: Record<string, string> = { cache: 'Checking the gallery', research: 'Researching the parts', recovery: 'Researching the parts', inventory: 'Mapping the parts', vendor: 'Finding the suppliers', render: 'Drawing the exploded view', mapping: 'Placing the part labels', save: 'Saving the atlas' };
+
+/**
+ * Everything after the draft: supplier research and the exploded-view pass run IN PARALLEL (the LoRA endpoint's cold start overlaps the supplier research), both merge into the freshest saved
+ * copy, then the job is finished with its final usage. Runs inline in the job function (ATLAS_JOBS_TAIL unset, no LoRA) or in its own function (tail route) so that suppliers are not lost to the 720 s cap.
+ */
+export async function runJobTail(job: JobRecord, ctx: { origin: string; callerAddress: string; who: string; capAt: number; enrichmentPending: boolean; hasExploded: boolean }) {
+  const { origin, callerAddress, who, capAt, enrichmentPending } = ctx;
+  let hasExploded = ctx.hasExploded;
+  let lastWrite = 0;
+  const update = async (patch: Partial<JobRecord>, force = false) => {
+    Object.assign(job, patch);
+    if (!force && Date.now() - lastWrite < 4000) return;
+    lastWrite = Date.now();
+    try { await writeJob(job); } catch (error) { console.warn('atlas job write failed', error); }
+  };
+  const progress = (stage: string) => { const line = STAGE_LINES[stage]; if (line) void update({ stage, message: line }); };
+  const TIMED_OUT = Symbol('timed out');
+  const within = <T,>(work: Promise<T>): Promise<T | typeof TIMED_OUT> => Promise.race([work, new Promise<typeof TIMED_OUT>((resolve) => setTimeout(() => resolve(TIMED_OUT), Math.max(1000, capAt - Date.now())))]);
+  try {
+    const rounds = loraAsyncOn() ? Math.max(1, Number(process.env.ATLAS_JOBS_REEXPLODE_ROUNDS ?? 1) || 1) : Math.max(0, Number(process.env.ATLAS_JOBS_REEXPLODE_ROUNDS ?? 1) || 0);
+    const runEnrich = async () => {
+      if (!enrichmentPending) return;
+      await update({ state: 'enriching', stage: 'vendor', message: 'Finding the suppliers' }, true);
+      const enrichRun = capAt - Date.now() < 90_000 ? TIMED_OUT : await within(callPipeline(origin, callerAddress, job.subject, 'enrich', who, progress));
+      if (enrichRun === TIMED_OUT) {
+        job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish in time; the atlas is ready without it.`;
+        return;
+      }
+      if (enrichRun.buildId) job.buildIds = [...(job.buildIds ?? []), enrichRun.buildId];
+      if (enrichRun.status === 200 && enrichRun.payload.suppliersUnavailable === true) job.warning = `${job.warning ? `${job.warning} ` : ''}Suppliers unavailable: no supplier relationships could be established for this subject.`;
+      if (enrichRun.status !== 200) job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish: ${String(enrichRun.payload.error ?? enrichRun.status).slice(0, 160)}`;
+    };
+    // quality first (founder 10-12): an atlas without an exploded view gets more rounds (each up to ATLAS_LORA_ATTEMPTS / 3 renders) before it is left assembled-only
+    const runExploded = async () => {
+      for (let round = 0; !hasExploded && round < rounds; round += 1) {
+        if (capAt - Date.now() < 150_000) break;
+        const againRun = await within(callPipeline(origin, callerAddress, job.subject, 'reexplode', who, progress));
+        if (againRun === TIMED_OUT) break;
+        if (againRun.buildId) job.buildIds = [...(job.buildIds ?? []), againRun.buildId];
+        hasExploded = againRun.status === 200 && Boolean((againRun.payload.atlas as { explodedImage?: unknown } | undefined)?.explodedImage);
+        if (hasExploded) job.warning = job.warning?.replace(/Exploded image:[^.]*\.?\s*/i, '').trim() || undefined;
+      }
+    };
+    await Promise.all([runEnrich(), runExploded()]);
+    const usage = await usageOfBuilds(job.buildIds ?? [], { explodedDelivered: hasExploded });
+    if (job.tail) job.tail = { ...job.tail, state: 'done' };
+    await update({ state: 'done', stage: 'done', message: 'Done', usage, finishedAt: new Date().toISOString() }, true);
+  } catch (error) {
+    console.error('atlas job tail failed', error);
+    const usage = await usageOfBuilds(job.buildIds ?? [], { explodedDelivered: hasExploded }).catch(() => undefined);
+    await update({ usage, state: 'done', stage: 'done', message: 'Done', warning: `${job.warning ? `${job.warning} ` : ''}The suppliers pass ended early.`, finishedAt: new Date().toISOString() }, true);
+  }
 }
