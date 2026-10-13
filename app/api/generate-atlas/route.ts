@@ -5,6 +5,7 @@ import { isBlockedKey, refusedSubject } from '@/app/blocked-atlases';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
 import { jobsAuthorized } from '@/app/atlas-jobs';
 import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
+import { sanitizeSupplierResult } from '@/app/supplier-sanitize';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho, ledgerElapsedMs } from '@/app/cost-ledger';
@@ -755,7 +756,7 @@ Coverage is an audit ledger, not a confidence performance. Return exactly one co
     tools: [{ type: 'web_search', search_context_size: 'medium' }],
     text: { format: { type: 'json_schema', name: 'supplier_evidence', strict: true, schema: supplierResearchSchema } },
   }, report, { stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} is still searching` });
-  return JSON.parse(extractOutputText(payload)) as SupplierResearchResult;
+  return sanitizeSupplierResult(JSON.parse(extractOutputText(payload)) as SupplierResearchResult);
 }
 
 async function enrichSuppliers(
