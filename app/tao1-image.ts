@@ -152,7 +152,7 @@ export async function loraGenerateImage(endpoint: string, apiKey: string, prompt
   if (!submit.ok) throw new Error(`LoRA submit failed (${submit.status}).`);
   const job = await submit.json() as { id?: string };
   if (!job.id) throw new Error('LoRA submit returned no job id.');
-  const deadline = t0 + (Number(process.env.ATLAS_LORA_TIMEOUT_MS) || 330_000); // a cold or capacity-starved endpoint must not hold the job: give up and ship assembled-only
+  const deadline = t0 + (Number(process.env.ATLAS_LORA_TIMEOUT_MS) || 480_000); // a cold or capacity-starved endpoint must not hold the job: give up and ship assembled-only
   for (;;) {
     await new Promise((resolve) => setTimeout(resolve, 4000));
     if (Date.now() > deadline) {

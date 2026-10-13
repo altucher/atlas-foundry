@@ -86,7 +86,16 @@ async function callPipeline(origin: string, callerAddress: string, subject: stri
   return result ?? { status: 502, payload: { error: 'The build ended without a result.' } };
 }
 
+/** the LoRA exploded-view endpoint scales to zero and a cold worker takes minutes: ask it for a tiny throwaway image at job start so the worker is up by the time the draft is ready */
+function warmLoraEndpoint() {
+  const endpoint = process.env.ATLAS_LORA_ENDPOINT?.trim();
+  const apiKey = process.env.RUNPOD_API_KEY?.trim();
+  if (process.env.ATLAS_EXPLODED_PROVIDER?.trim().toLowerCase() !== 'lora' || !endpoint || !apiKey) return;
+  void fetch(`https://api.runpod.ai/v2/${encodeURIComponent(endpoint)}/run`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ input: { prompt: 'Axonometric exploded technical diagram of a small cube, white background, no text.', width: 512, height: 512, seed: 1 } }) }).catch(() => undefined);
+}
+
 async function runJob(job: JobRecord, origin: string, callerAddress: string, who: string) {
+  warmLoraEndpoint();
   let lastWrite = 0;
   const update = async (patch: Partial<JobRecord>, force = false) => {
     Object.assign(job, patch);
