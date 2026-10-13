@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 
 import { after, NextResponse } from 'next/server';
 
-import { POST as generateAtlas } from '@/app/api/generate-atlas/route';
 import { cacheKeyForPrompt, hasSharedAtlasStore, loadGalleryAtlas } from '@/app/atlas-store';
 import { countActiveJobs, isActive, jobsAuthorized, pseudonym, readJob, usageOfBuilds, writeJob, type JobRecord } from '@/app/atlas-jobs';
 import { isBlockedKey, refusedSubject } from '@/app/blocked-atlases';
+import { callPipeline, loraAsyncOn, warmLoraEndpoint } from '@/app/jobs-pipeline';
 
 export const runtime = 'nodejs';
 export const maxDuration = 800;
@@ -53,40 +53,8 @@ export async function POST(request: Request) {
   return NextResponse.json({ ...job, billable: true }, { status: 202 });
 }
 
-type StreamResult = { status: number; payload: Record<string, unknown>; buildId?: string };
-
-async function callPipeline(origin: string, callerAddress: string, subject: string, phase: 'draft' | 'enrich' | 'reexplode', who: string, onProgress: (stage: string, message: string) => void): Promise<StreamResult> {
-  const response = await generateAtlas(new Request(`${origin}/api/generate-atlas`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/x-ndjson', 'x-real-ip': callerAddress, 'x-atlas-jobs-key': process.env.ATLAS_JOBS_KEY ?? '', 'x-atlas-who': who },
-    body: JSON.stringify({ prompt: subject, phase }),
-  }));
-  if (!response.body) return { status: response.status, payload: await response.json().catch(() => ({})) as Record<string, unknown> };
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let result: StreamResult | null = null;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let newline = buffer.indexOf('\n');
-    while (newline >= 0) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      newline = buffer.indexOf('\n');
-      if (!line) continue;
-      try {
-        const entry = JSON.parse(line) as { type?: string; stage?: string; message?: string; status?: number; payload?: Record<string, unknown>; buildId?: string };
-        if (entry.type === 'progress' && entry.stage && entry.stage !== 'source') onProgress(entry.stage, entry.message ?? '');
-        if (entry.type === 'result') result = { status: entry.status ?? 500, payload: entry.payload ?? {}, buildId: entry.buildId };
-      } catch { /* ignore a partial line */ }
-    }
-  }
-  return result ?? { status: 502, payload: { error: 'The build ended without a result.' } };
-}
-
 async function runJob(job: JobRecord, origin: string, callerAddress: string, who: string) {
+  warmLoraEndpoint();
   let lastWrite = 0;
   const update = async (patch: Partial<JobRecord>, force = false) => {
     Object.assign(job, patch);
@@ -126,33 +94,41 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
       return;
     }
     await update({ state: 'draft_ready', atlasKey: job.id, stage: 'draft', message: 'Ready to open; finding the suppliers', warning: typeof draft.payload.imageWarning === 'string' ? draft.payload.imageWarning.slice(0, 300) : undefined }, true);
-    if (draft.payload.enrichmentPending) {
+    // The suppliers pass and the exploded-view pass run IN PARALLEL (the LoRA endpoint's cold start of minutes overlaps the supplier research); both merge into the freshest saved copy.
+    const rounds = loraAsyncOn() ? 0 : Math.max(0, Number(process.env.ATLAS_JOBS_REEXPLODE_ROUNDS ?? 1) || 0);
+    let hasExploded = Boolean((draft.payload.atlas as { explodedImage?: unknown }).explodedImage);
+    const runEnrich = async () => {
+      if (!draft.payload.enrichmentPending) return;
       await update({ state: 'enriching', stage: 'vendor', message: 'Finding the suppliers' }, true);
       const enrichRun = capAt - Date.now() < 90_000 ? TIMED_OUT : await within(callPipeline(origin, callerAddress, job.subject, 'enrich', who, progress));
       if (enrichRun === TIMED_OUT) {
         job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish in time; the atlas is ready without it.`;
-      } else {
-      const enrich = enrichRun;
-      if (enrich.buildId) job.buildIds = [...(job.buildIds ?? []), enrich.buildId];
-      if (enrich.status === 200 && enrich.payload.suppliersUnavailable === true) job.warning = `${job.warning ? `${job.warning} ` : ''}Suppliers unavailable: no supplier relationships could be established for this subject.`;
-      if (enrich.status !== 200) job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish: ${String(enrich.payload.error ?? enrich.status).slice(0, 160)}`;
+        return;
       }
-    }
-    // quality first (founder 10-12): an atlas whose exploded view failed the visual QA gets more rounds (each up to 3 renders) before it is left assembled-only
-    const rounds = Math.max(0, Number(process.env.ATLAS_JOBS_REEXPLODE_ROUNDS ?? 1) || 0);
-    let hasExploded = Boolean((draft.payload.atlas as { explodedImage?: unknown }).explodedImage);
-    for (let round = 0; !hasExploded && round < rounds; round += 1) {
-      await update({ stage: 'render', message: 'Drawing the exploded view' }, true);
-      if (capAt - Date.now() < 150_000) break;
-      const againRun = await within(callPipeline(origin, callerAddress, job.subject, 'reexplode', who, progress));
-      if (againRun === TIMED_OUT) break;
-      const again = againRun;
-      if (again.buildId) job.buildIds = [...(job.buildIds ?? []), again.buildId];
-      hasExploded = again.status === 200 && Boolean((again.payload.atlas as { explodedImage?: unknown } | undefined)?.explodedImage);
-      if (hasExploded) job.warning = undefined;
-    }
+      if (enrichRun.buildId) job.buildIds = [...(job.buildIds ?? []), enrichRun.buildId];
+      if (enrichRun.status === 200 && enrichRun.payload.suppliersUnavailable === true) job.warning = `${job.warning ? `${job.warning} ` : ''}Suppliers unavailable: no supplier relationships could be established for this subject.`;
+      if (enrichRun.status !== 200) job.warning = `${job.warning ? `${job.warning} ` : ''}Supplier research did not finish: ${String(enrichRun.payload.error ?? enrichRun.status).slice(0, 160)}`;
+    };
+    // quality first (founder 10-12): an atlas without an exploded view gets more rounds (each up to ATLAS_LORA_ATTEMPTS / 3 renders) before it is left assembled-only
+    const runExploded = async () => {
+      for (let round = 0; !hasExploded && round < rounds; round += 1) {
+        if (capAt - Date.now() < 150_000) break;
+        const againRun = await within(callPipeline(origin, callerAddress, job.subject, 'reexplode', who, progress));
+        if (againRun === TIMED_OUT) break;
+        if (againRun.buildId) job.buildIds = [...(job.buildIds ?? []), againRun.buildId];
+        hasExploded = againRun.status === 200 && Boolean((againRun.payload.atlas as { explodedImage?: unknown } | undefined)?.explodedImage);
+        if (hasExploded) job.warning = job.warning?.replace(/Exploded image:[^.]*\.?\s*/i, '').trim() || undefined;
+      }
+    };
+    await Promise.all([runEnrich(), runExploded()]);
     const usage = await usageOfBuilds(job.buildIds ?? [], { explodedDelivered: hasExploded });
+    const explodedLater = loraAsyncOn() && !hasExploded;
+    if (explodedLater) job.exploded = { state: 'queued', message: 'The exploded view is being drawn' };
     await update({ state: 'done', stage: 'done', message: 'Done', usage, finishedAt: new Date().toISOString() }, true);
+    if (explodedLater) {
+      // hand the exploded view to its own function (it can wait minutes for a cold GPU); the job is already done and billed
+      await fetch(`${origin}/api/atlas-jobs/${encodeURIComponent(job.id)}/exploded`, { method: 'POST', headers: { 'x-atlas-jobs-key': process.env.ATLAS_JOBS_KEY ?? '', 'content-type': 'application/json' }, body: JSON.stringify({ callerAddress, who }) }).catch((error) => console.warn('exploded follow-up not started', error));
+    }
   } catch (error) {
     console.error('atlas job failed', error);
     const usage = await usageOfBuilds(job.buildIds ?? []).catch(() => undefined);

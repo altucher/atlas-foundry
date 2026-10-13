@@ -39,6 +39,8 @@ export type JobRecord = {
   /** billing: exact usage of every pipeline call this job made (draft and enrich), also when the job failed; see usageOfBuilds() */
   usage?: JobUsage;
   buildIds?: string[];
+  /** the exploded view of a LoRA build is rendered AFTER the job is done, in its own function (a cold GPU takes minutes); the page picks it up when the atlas record gains it */
+  exploded?: { state: 'queued' | 'rendering' | 'done' | 'failed'; startedAt?: string; finishedAt?: string; message?: string };
 };
 
 const ACTIVE: JobState[] = ['queued', 'drafting', 'draft_ready', 'enriching'];
