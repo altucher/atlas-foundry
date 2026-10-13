@@ -35,7 +35,7 @@ function requiredKeysMissing(value: unknown, schema: Record<string, unknown>) {
 export type Tao1Usage = { prompt_tokens?: number; completion_tokens?: number };
 
 /** one structured research call; returns a Responses-shaped completed payload */
-export async function tao1StructuredCall(conn: Tao1Connection, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function tao1StructuredCall(conn: Tao1Connection, body: Record<string, unknown>, onlyModel?: string): Promise<Record<string, unknown>> {
   const text = body.text as { format?: { schema?: Record<string, unknown>; name?: string } } | undefined;
   const schema = text?.format?.schema ?? {};
   const maxOut = typeof body.max_output_tokens === 'number' ? body.max_output_tokens : 32_000;
@@ -53,7 +53,7 @@ ${JSON.stringify(schema)}`;
       headers: { Authorization: `Bearer ${conn.apiKey}`, 'Content-Type': 'application/json' },
       // The TAO-1 API does not read a client X-Request-Id; metadata.session_id is how a call joins a ledger session (a scoped key forces its own session anyway). max_tokens and response_format are
       // hints that the live API may ignore today, so the schema is also stated in the system prompt and the reply is parsed and repaired here.
-      body: JSON.stringify({ model: conn.model, messages, max_tokens: maxOut, response_format: { type: 'json_object' }, metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything' } }),
+      body: JSON.stringify({ model: conn.model, ...(onlyModel ? { only_model: onlyModel } : {}), messages, max_tokens: maxOut, response_format: { type: 'json_object' }, metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything' } }),
     });
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 300);

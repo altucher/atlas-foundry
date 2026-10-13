@@ -594,8 +594,10 @@ async function generateResearchInBackground(
 ) {
   if (connection.textProvider === 'tao1' && connection.tao1 && typeof body.input === 'string') {
     report({ stage: progress.stage, message: `${progress.message} (through the TAO-1 API)…` });
-    const payload = await tao1StructuredCall(connection.tao1, body);
-    recordResponse(progress.stage, connection.tao1.model, payload, { provider: 'tao1' });
+    // optional cheaper open-weight cell per stage (TAO-1 founder parameter only_model, e.g. engy/deepseek-v4.1-flash); unset = the default tao-1 cell
+    const onlyModel = progress.stage === 'vendor' ? process.env.ATLAS_VENDOR_ONLY_MODEL?.trim() || undefined : undefined;
+    const payload = await tao1StructuredCall(connection.tao1, body, onlyModel);
+    recordResponse(progress.stage, onlyModel ?? connection.tao1.model, payload, { provider: 'tao1' });
     return payload;
   }
   const headers = { Authorization: `Bearer ${connection.apiKey}`, 'Content-Type': 'application/json' };
@@ -1141,8 +1143,8 @@ async function assessGeneratedImage(
     : 'Pass only when no complete intact assembled product is shown (neither dominating the frame nor beside the parts), the visible pieces all belong to one disassembled subject, components are distinct and distributed across the useful frame rather than piled at its center. Repeated parts and repeated sub-assemblies are allowed. FAIL when the image contains visible text, labels, letters or numbers that are garbled, misspelled, irrelevant or illegible; legible and correct labels are acceptable.';
   const qaInstructions = `Act as a strict product-visualization quality inspector. The requested subject is ${subject}; the requested state is ${mode}. ${passRule} Ignore photorealism and component completeness for this check. List short concrete composition failures. Do not excuse a complete reference copy merely because other parts are exploded.`
   if (connection.visionProvider === 'tao1' && connection.tao1) {
-    const r = await tao1VisionText(connection.tao1, `${qaInstructions}\nReply with ONE JSON object and nothing else: {"pass": boolean, "issues": [short strings, at most 8]}.`, 'Inspect this image.', image, 1500);
-    recordResponse('image-qa', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
+    const r = await tao1VisionText(connection.tao1, `${qaInstructions}\nReply with ONE JSON object and nothing else: {"pass": boolean, "issues": [short strings, at most 8]}.`, 'Inspect this image.', image, 1500, process.env.ATLAS_QA_ONLY_MODEL?.trim() || undefined);
+    recordResponse('image-qa', process.env.ATLAS_QA_ONLY_MODEL?.trim() || connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
     const m = /\{[\s\S]*\}/.exec(r.text);
     const parsed = m ? JSON.parse(m[0]) as { pass?: boolean; issues?: string[] } : null;
     if (!parsed || typeof parsed.pass !== 'boolean') throw new Error('Image QA reply was not usable.');
@@ -1195,7 +1197,7 @@ async function locateHotspots(connection: AiConnection, explodedImage: string, p
   const partList = parts.map((part) => `${part.id}: ${part.name}`).join('\n');
   const hotspotInstructions = 'Locate components in an exploded-view product image. Return a tight clickable bounding rectangle for each requested component cluster. Express its center as x/y percentages and its size as width/height percentages of the full image, measured from the top-left corner. Use every exact id once. If several adjacent pieces form one system, enclose that cluster. Do not include unrelated neighboring parts.'
   if (connection.visionProvider === 'tao1' && connection.tao1) {
-    const r = await tao1VisionText(connection.tao1, `${hotspotInstructions}\nReply with ONE JSON object and nothing else: {"hotspots":[{"id": string, "x": number 0-100, "y": number 0-100, "width": number 1-100, "height": number 1-100}]} with one entry for every requested id.`, `Locate these components:\n${partList}`, explodedImage, 6000);
+    const r = await tao1VisionText(connection.tao1, `${hotspotInstructions}\nReply with ONE JSON object and nothing else: {"hotspots":[{"id": string, "x": number 0-100, "y": number 0-100, "width": number 1-100, "height": number 1-100}]} with one entry for every requested id.`, `Locate these components:\n${partList}`, explodedImage, 6000, process.env.ATLAS_HOTSPOT_ONLY_MODEL?.trim() || undefined);
     recordResponse('hotspots', connection.tao1.model, { usage: r.usage ? { input_tokens: r.usage.prompt_tokens, output_tokens: r.usage.completion_tokens } : undefined }, { provider: 'tao1', ms: r.ms });
     const m = /\{[\s\S]*\}/.exec(r.text);
     if (!m) throw new Error('Hotspot reply was not usable.');

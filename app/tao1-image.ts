@@ -59,12 +59,12 @@ export async function tao1GenerateImage(conn: Tao1Connection, prompt: string): P
 }
 
 /** a vision call (image content part) returning the model's text; used for image QA and hotspot mapping */
-export async function tao1VisionText(conn: Tao1Connection, system: string, userText: string, imageDataUrl: string, maxTokens = 4000) {
+export async function tao1VisionText(conn: Tao1Connection, system: string, userText: string, imageDataUrl: string, maxTokens = 4000, onlyModel?: string) {
   const t0 = Date.now();
   const response = await undiciFetch(`${conn.baseUrl}/chat/completions`, {
     dispatcher, method: 'POST',
     headers: { Authorization: `Bearer ${conn.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: conn.model, max_tokens: maxTokens, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: imageDataUrl } }] }], metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything-vision' } }),
+    body: JSON.stringify({ model: conn.model, ...(onlyModel ? { only_model: onlyModel } : {}), max_tokens: maxTokens, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: imageDataUrl } }] }], metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything-vision' } }),
   });
   if (!response.ok) throw new Error(`TAO-1 vision call failed (${response.status}): ${(await response.text()).slice(0, 300)}`);
   const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
