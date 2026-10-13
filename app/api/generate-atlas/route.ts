@@ -1069,7 +1069,8 @@ function positiveRetry(issues: string[]) {
     : null;
 }
 function correctionOrPositive(issues: string[], composition: string) {
-  return positiveRetry(issues) ?? correctionFor(issues, composition);
+  // measured 10-13 (DJI, KitchenAid): the positive wording alone delivered 0/2, the same as the old correction; off unless ATLAS_EXPLODED_POSITIVE=1
+  return (process.env.ATLAS_EXPLODED_POSITIVE === '1' ? positiveRetry(issues) : null) ?? correctionFor(issues, composition);
 }
 
 const EXPLODED_DEFERRED = 'Exploded view deferred: rendered after the atlas is ready.';
