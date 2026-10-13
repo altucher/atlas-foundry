@@ -1523,12 +1523,18 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
       report({ stage: 'source', message: `Source · ${source.publisher} — ${source.title}` });
     }
     report({ stage: 'render', message: 'Fast image pass · rendering the assembled and exploded views in parallel…' });
-    const imageResults = await Promise.allSettled([
-      generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
-        .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; }),
-      raceBudget(generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin, connection.openrouterKey ? 3 : 1)), Math.max(1, (Number(process.env.ATLAS_EXPLODED_BUDGET_MS) || 420_000) - ledgerElapsedMs()), 'Exploded view skipped: the time budget was reached.')
-        .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; }),
-    ]);
+    // ASSEMBLED FIRST (Master 10-13, a user saw nothing for 7 min): the draft ships as soon as the assembled image is ready; the exploded view only gets a short grace after that
+    // (ATLAS_EXPLODED_GRACE_MS, default 45 s, never past ATLAS_EXPLODED_BUDGET_MS) and is otherwise left for a later pass.
+    const assembledPromise = generateImage(connection, normalized.subject, normalized.visualPrompt, 'assembled', normalized.parts, normalized.imageOrientation)
+      .then((value) => { report({ stage: 'render', message: 'Assembled studio render complete.' }); return value; });
+    const explodedPromise = generateImage(connection, normalized.subject, normalized.visualPrompt, 'exploded', normalized.parts, normalized.imageOrientation, explodedAttemptsFor(request, isAdmin, connection.openrouterKey ? 3 : 1))
+      .then((value) => { report({ stage: 'render', message: 'Exploded component render complete.' }); return value; });
+    explodedPromise.catch(() => undefined);
+    const assembledResult = (await Promise.allSettled([assembledPromise]))[0];
+    const explodedBudget = Number(process.env.ATLAS_EXPLODED_BUDGET_MS) || 420_000;
+    const graceMs = Math.max(1, Math.min(Number(process.env.ATLAS_EXPLODED_GRACE_MS) || 45_000, explodedBudget - ledgerElapsedMs()));
+    const explodedResult = (await Promise.allSettled([raceBudget(explodedPromise, graceMs, 'Exploded view skipped: it was not ready in time, the atlas ships with the assembled view.')]))[0];
+    const imageResults = [assembledResult, explodedResult] as const;
     const image = imageResults[0].status === 'fulfilled' ? imageResults[0].value : undefined;
     const explodedImage = imageResults[1].status === 'fulfilled' ? imageResults[1].value : undefined;
     const imageWarnings = imageResults.flatMap((result, index) => result.status === 'rejected'
