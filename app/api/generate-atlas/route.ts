@@ -750,7 +750,10 @@ Each note must state the role, exact product/version/time scope, whether the rel
 
 Coverage is an audit ledger, not a confidence performance. Return exactly one coverage entry for every supplied partId. Use sourced when at least one retained relationship is backed by a component-specific source; searched-no-specific-evidence when you searched the avenues above but found no sufficiently specific relationship; and not-applicable only when the item genuinely has no external vendor or IP relationship to research. The summary must briefly state which product-family/current/historical avenues were checked and why evidence was retained or withheld. Never omit a supplied partId.`;
   report({ stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} · checking ${parts.length} components individually…` });
+  // part-specific grounding query for this batch (see tao1StructuredCall)
+  const searchQuery = `${atlas.subject} ${parts.slice(0, 3).map((part) => part.name).join(' ')} supplier OR manufacturer OR part number`.slice(0, 300);
   const payload = await generateResearchWithFallback(connection, {
+    searchQuery,
     model: connection.supplierResearchModel,
     reasoning: { effort: 'low' },
     instructions,
@@ -1527,6 +1530,7 @@ Set imageOrientation to portrait for strongly vertical subjects such as launch v
         : `Fast first pass · mapping ${prompt} with ${defaultDraftModel}…`,
     });
     const researchBody = {
+      searchQuery: `${researchPrompt} components teardown bill of materials architecture`.slice(0, 300),
         model: connection.draftModel,
         reasoning: { effort: 'low' },
         instructions,

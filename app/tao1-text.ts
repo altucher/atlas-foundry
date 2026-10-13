@@ -39,6 +39,9 @@ export async function tao1StructuredCall(conn: Tao1Connection, body: Record<stri
   const text = body.text as { format?: { schema?: Record<string, unknown>; name?: string } } | undefined;
   const schema = text?.format?.schema ?? {};
   // ATLAS_TAO1_MAX_TOKENS raises the output cap for the big research/vendor answers (engines 10-13: ~48000 stops answers being cut at 32k)
+  // the gateway's grounding search uses the head of the prompt as its query unless metadata.search_query is given (engines 10-13: every vendor call searched the generic 'Subject: ... Accuracy boundary' head);
+  // a part-specific query (<= 300 chars) makes the search find part-level evidence
+  const searchQuery = typeof body.searchQuery === 'string' && body.searchQuery.trim() ? body.searchQuery.trim().slice(0, 300) : undefined;
   const maxOutOverride = Number(process.env.ATLAS_TAO1_MAX_TOKENS);
   const maxOut = Number.isFinite(maxOutOverride) && maxOutOverride > 0 ? maxOutOverride : typeof body.max_output_tokens === 'number' ? body.max_output_tokens : 32_000;
   const system = `${String(body.instructions ?? '')}
@@ -58,7 +61,7 @@ ${JSON.stringify(schema)}`;
       headers: { Authorization: `Bearer ${conn.apiKey}`, 'Content-Type': 'application/json' },
       // The TAO-1 API does not read a client X-Request-Id; metadata.session_id is how a call joins a ledger session (a scoped key forces its own session anyway). max_tokens and response_format are
       // hints that the live API may ignore today, so the schema is also stated in the system prompt and the reply is parsed and repaired here.
-      body: JSON.stringify({ model: conn.model, ...(onlyModel ? { only_model: onlyModel } : {}), messages, max_tokens: maxOut, response_format: { type: 'json_object' }, metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything' } }),
+      body: JSON.stringify({ model: conn.model, ...(onlyModel ? { only_model: onlyModel } : {}), messages, max_tokens: maxOut, response_format: { type: 'json_object' }, metadata: { session_id: `explode-${currentBuildId() ?? 'adhoc'}`, source: 'explode-anything', ...(searchQuery ? { search_query: searchQuery } : {}) } }),
     });
     if (!response.ok) {
       const detail = (await response.text()).slice(0, 300);

@@ -71,3 +71,18 @@ test('cached prompt tokens reach the usage record (summed over attempts)', async
   assert.equal(payload.usage.input_tokens, 1000);
   assert.equal(payload.usage.input_tokens_details.cached_tokens, 400);
 });
+
+test('a part-specific search query is passed to the gateway as metadata.search_query (max 300 chars)', async () => {
+  const { server, calls, conn } = await gateway([{ content: '{"parts":[1]}', finish: 'stop' }]);
+  await tao1StructuredCall(conn, { ...body, searchQuery: `Instant Pot Duo ${'x'.repeat(400)}` });
+  server.close();
+  assert.ok(calls[0].metadata.search_query.startsWith('Instant Pot Duo'));
+  assert.equal(calls[0].metadata.search_query.length, 300);
+});
+
+test('no search query: no search_query field is sent', async () => {
+  const { server, calls, conn } = await gateway([{ content: '{"parts":[1]}', finish: 'stop' }]);
+  await tao1StructuredCall(conn, body);
+  server.close();
+  assert.equal('search_query' in calls[0].metadata, false);
+});
