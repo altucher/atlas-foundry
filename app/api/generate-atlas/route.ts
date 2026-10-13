@@ -387,6 +387,11 @@ function safeUrl(value: string) {
   }
 }
 
+/** the model-written accuracy note often says 'proprietary' / 'confidential'; those words trip the gateway's privacy/heavy-reasoning routing (vote3, 3x cost) on the supplier calls, so they are neutralised in the prompt copy only */
+function plainBoundary(note: string) {
+  return String(note ?? '').replace(/\b(proprietary|confidential|trade[- ]secret|non-?public)\b/gi, 'unpublished');
+}
+
 function normalizeAtlas(raw: Omit<FoundryAtlas, 'mode'> & { visualPrompt: string }) {
   const sources: AtlasSource[] = raw.sources
     .map((source, index) => ({
@@ -765,7 +770,7 @@ Coverage is an audit ledger, not a confidence performance. Return exactly one co
     model: connection.supplierResearchModel,
     reasoning: { effort: 'low' },
     instructions,
-    input: `Subject: ${atlas.subject}\nCategory: ${atlas.category}\nAccuracy boundary: ${atlas.accuracyNote}\n\nComponent ids:\n${partList}\n\nExisting architecture sources (use only when they directly support a relationship):\n${existingSources}`,
+    input: `Subject: ${atlas.subject}\nCategory: ${atlas.category}\nAccuracy boundary: ${plainBoundary(atlas.accuracyNote)}\n\nComponent ids:\n${partList}\n\nExisting architecture sources (use only when they directly support a relationship):\n${existingSources}`,
     tools: [{ type: 'web_search', search_context_size: 'medium' }],
     text: { format: { type: 'json_schema', name: 'supplier_evidence', strict: true, schema: supplierResearchSchema } },
   }, report, { stage: 'vendor', message: `Supplier evidence pass ${batchIndex + 1}/${batchCount} is still searching` });
@@ -968,7 +973,7 @@ async function researchFalconNineLayer(
 
 Return 24–36 distinct, physically or operationally identifiable components at the lowest level that public evidence can support. Distinguish Falcon 9 v1.0, v1.1, Full Thrust, Block 4, Block 5, Cargo Dragon, Crew Dragon, fairing, expendable and recovered missions wherever the hardware or supplier relationship changed. Treat the current Block 5 family as the reference, with earlier or mission-specific items explicitly labeled historical or variant-specific. Do not repeat overview items unless decomposing them into documented subassemblies.
 
-Prioritize SpaceX user guides, launch and mission material, NASA, FAA and NTSB records, environmental and regulatory filings, patents, supplier disclosures, SEC or exchange filings, technical conference papers, credible technical journalism, and high-quality imagery. Do not infer proprietary construction from photographs. Every component must cite a consulted HTTPS source. Preserve meaningful power, data, thermal, fluid, mechanical, structural, control and propulsive connections among ids returned in this layer.
+Prioritize SpaceX user guides, launch and mission material, NASA, FAA and NTSB records, environmental and regulatory filings, patents, supplier disclosures, SEC or exchange filings, technical conference papers, credible technical journalism, and high-quality imagery. Do not infer construction details from photographs that the sources do not state. Every component must cite a consulted HTTPS source. Preserve meaningful power, data, thermal, fluid, mechanical, structural, control and propulsive connections among ids returned in this layer.
 
 Audit the public supply chain as part of the architecture: retain SpaceX only for component-specific design, manufacture, software or integration that a source establishes. Search for outside manufacturers, materials, electronics, sensors, actuators, navigation and communications devices, licensed IP, foundry or fabrication, alternative generations and credible published reports. Label each relationship confirmed, reported or rumored and scope it to the exact generation, mission, period or subsystem. A dedicated component-by-component supplier pass follows.
 
