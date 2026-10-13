@@ -1245,7 +1245,7 @@ async function debugKeepQa(image: string, subject: string, verdict: { pass: bool
   try {
     const { put } = await import('@vercel/blob');
     const base = `${galleryRoot()}/_qa_debug/${cacheKeyForPrompt(subject)}/${Date.now()}-${layoutOnly ? 'layout' : 'strict'}-${verdict.pass ? 'pass' : 'fail'}`;
-    const match = /^data:(image\/[a-z+]+);base64,(.*)$/s.exec(image);
+    const match = /^data:(image\/[a-z+]+);base64,([\s\S]*)$/.exec(image);
     if (match) await put(`${base}.${match[1].endsWith('png') ? 'png' : 'jpg'}`, Buffer.from(match[2], 'base64'), { access: 'public', contentType: match[1], addRandomSuffix: false, allowOverwrite: true });
     await put(`${base}.json`, JSON.stringify({ subject, layoutOnly, pass: verdict.pass, issues: verdict.issues, qaModel: process.env.ATLAS_QA_ONLY_MODEL ?? 'default' }), { access: 'public', contentType: 'application/json', addRandomSuffix: false, allowOverwrite: true });
   } catch (error) {
