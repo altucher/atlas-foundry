@@ -169,7 +169,7 @@ export async function loraGenerateImage(endpoint: string, apiKey: string, prompt
     const buf = Buffer.from(b64, 'base64');
     const size = imageSize(buf);
     const perSecond = Number(process.env.ATLAS_LORA_USD_PER_SEC) || 0.00076;
-    return { model: 'tencent/LoRAImage-3.0-Instruct-Distil', cost: typeof status.executionTime === 'number' ? Math.round(status.executionTime / 1000 * perSecond * 1e6) / 1e6 : null, dataUrl: `data:image/png;base64,${b64}`, mime: 'image/png', bytes: buf.length, ms: Date.now() - t0, sourceUrl: 'runpod', usage: null, width: size?.w ?? null, height: size?.h ?? null };
+    return { model: 'runpod/qwen-image-2512+exploded-lora', cost: typeof status.executionTime === 'number' ? Math.round(status.executionTime / 1000 * perSecond * 1e6) / 1e6 : null, dataUrl: `data:image/png;base64,${b64}`, mime: 'image/png', bytes: buf.length, ms: Date.now() - t0, sourceUrl: 'runpod', usage: null, width: size?.w ?? null, height: size?.h ?? null };
   }
 }
 

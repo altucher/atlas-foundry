@@ -1094,23 +1094,31 @@ async function generateImage(
   const loraExploded = mode === 'exploded' && Boolean(connection.lora);
   const orExploded = mode === 'exploded' && Boolean(connection.openrouterKey);
   const strictExploded = mode === 'exploded' && (connection.imageProvider === 'chutes' || orExploded || loraExploded);
-  const attempts = loraExploded ? Math.max(1, Number(process.env.ATLAS_LORA_ATTEMPTS) || 6) : (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
+  // r26: LoRA first; when it exhausts its attempts or its time cap the Chutes exploded path takes over (the user keeps an exploded view, the card is not slower than the cap allows)
+  const loraFallback = loraExploded && connection.imageProvider === 'chutes' && Boolean(connection.chutesKey) && process.env.ATLAS_LORA_FALLBACK !== '0';
+  const loraAttempts = Math.max(1, Number(process.env.ATLAS_LORA_ATTEMPTS) || (loraFallback ? 2 : 6));
+  const loraBudgetMs = Number(process.env.ATLAS_LORA_BUDGET_MS) || 75_000;
+  const loraStart = Date.now();
+  let loraOff = false;
+  const attempts = loraExploded ? (loraFallback ? loraAttempts + explodedAttempts : loraAttempts) : (connection.imageProvider === 'chutes' || orExploded) ? (mode === 'exploded' ? explodedAttempts : 2) : 2;
   const explodedBudgetMs = Number(process.env.ATLAS_EXPLODED_BUDGET_MS) || 420_000;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     // the exploded view never holds the atlas back: past its time budget the build ships assembled-only
     if (mode === 'exploded' && ledgerElapsedMs() > explodedBudgetMs) throw new Error('Exploded view skipped: the time budget was reached.');
     const lastAttempt = attempt === attempts - 1;
-    if (loraExploded && connection.lora) {
+    if (loraExploded && connection.lora && !loraOff && loraFallback && (attempt >= loraAttempts || Date.now() - loraStart > loraBudgetMs)) loraOff = true;
+    if (loraExploded && connection.lora && !loraOff) {
+      const loraLast = attempt >= loraAttempts - 1 || (loraFallback && Date.now() - loraStart > loraBudgetMs);
       const loraPrompt = `Axonometric exploded technical diagram of ${subject}: every component separated along its assembly axis with clear gaps, parts floating apart and arranged across the whole frame, clean white background, no intact ${subject} anywhere in the frame, no text, no labels, no letters or numbers. Wide landscape 3:2. Parts include: ${parts.slice(0, 12).map((part) => part.name).join(', ')}.${retryDirection}`;
       let loraTimedOut = false;
       const generated = await loraGenerateImage(connection.lora.endpoint, connection.lora.apiKey, loraPrompt).catch((error: unknown) => { console.warn('LoRA image call failed', error); loraTimedOut = /timed out/i.test(String(error)); return null; });
-      if (!generated) { if (lastAttempt || loraTimedOut) throw new Error('Exploded view: the image service returned no image in time.'); continue; }
+      if (!generated) { if (loraLast || loraTimedOut) { if (loraFallback) { loraOff = true; continue; } throw new Error('Exploded view: the image service returned no image in time.'); } continue; }
       recordImage(`image-${mode}`, generated.model, { usage: undefined }, { quality: 'lora', provider: 'other', ms: generated.ms, usd: generated.cost ?? undefined });
       try {
         // judge the LAYOUT first (the open model paints pseudo-text), then remove all lettering with an open-weight edit model and run the full strict QA on what a person will see
         const layout = await assessGeneratedImage(connection, generated.dataUrl, subject, mode, true);
         if (!layout.pass) {
-          if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${layout.issues.join(' ').slice(0, 200)}`);
+          if (loraLast) { if (loraFallback) { loraOff = true; continue; } throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${layout.issues.join(' ').slice(0, 200)}`); }
           retryDirection = correctionFor(layout.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
           continue;
         }
@@ -1121,12 +1129,12 @@ async function generateImage(
         }
         const strict = await assessGeneratedImage(connection, finalImage, subject, mode);
         if (strict.pass) return finalImage;
-        if (lastAttempt) throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${strict.issues.join(' ').slice(0, 200)}`);
+        if (loraLast) { if (loraFallback) { loraOff = true; continue; } throw new Error(`Exploded view did not pass visual QA after ${attempts} attempts: ${strict.issues.join(' ').slice(0, 200)}`); }
         retryDirection = correctionFor(strict.issues, 'Recompose from scratch: an axonometric exploded technical diagram, every component separated along its assembly axis with clear gaps, and no intact product anywhere in the frame.');
       } catch (error) {
         if (/did not pass visual QA/.test(error instanceof Error ? error.message : '')) throw error;
         console.warn('LoRA exploded QA unavailable', error);
-        if (lastAttempt) throw new Error('Exploded view could not be checked by visual QA.');
+        if (loraLast) { if (loraFallback) { loraOff = true; continue; } throw new Error('Exploded view could not be checked by visual QA.'); }
       }
       continue;
     }
