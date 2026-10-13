@@ -4,6 +4,7 @@ import { Agent, fetch as undiciFetch } from 'undici';
 import { isBlockedKey, refusedSubject } from '@/app/blocked-atlases';
 import { adminAuthorized, clientId, dayBucket, hitLimit } from '@/app/api-guard';
 import { jobsAuthorized } from '@/app/atlas-jobs';
+import { openOnlyOn, openOnlyViolations } from '@/app/open-only';
 import { chutesGenerateImage, openrouterGenerateImage, tao1VisionText } from '@/app/tao1-image';
 import { tao1ConnectionFromEnv, tao1StructuredCall, type Tao1Connection } from '@/app/tao1-text';
 import { currentBuildId, finishLedger, mergeBuildCost, noteLedger, recordImage, recordResponse, runWithLedger, summarizeLedger, type BuildWho, ledgerElapsedMs } from '@/app/cost-ledger';
@@ -130,6 +131,20 @@ function directOpenAiModel(model: string) {
 }
 
 function getAiConnection(request: Request, textOverride?: 'openai' | 'tao1', imageOverride?: 'openai' | 'chutes'): AiConnection | null {
+  if (openOnlyOn()) {
+    // fail closed: no OpenAI / Vercel gateway / OpenRouter connection is ever built in this mode (the OpenAI base connection is not even read)
+    const problems = openOnlyViolations(process.env, { text: textOverride, image: imageOverride });
+    if (problems.length) {
+      console.error(`ATLAS_OPEN_ONLY refused the request: ${problems.join('; ')}`);
+      return null;
+    }
+    const tao1 = tao1ConnectionFromEnv();
+    if (!tao1) return null;
+    return {
+      apiKey: '', baseUrl: '', draftModel: tao1.model, researchModel: tao1.model, deepResearchModel: tao1.model, supplierResearchModel: tao1.model, imageModel: 'chutes/qwen-image-2512',
+      tao1, textProvider: 'tao1', visionProvider: 'tao1', imageProvider: 'chutes', chutesKey: process.env.CHUTES_API_KEY?.trim(),
+    };
+  }
   const base = getAiConnectionBase(request);
   if (!base) return null;
   const tao1 = tao1ConnectionFromEnv();

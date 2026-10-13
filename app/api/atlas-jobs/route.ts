@@ -4,7 +4,7 @@ import { after, NextResponse } from 'next/server';
 
 import { POST as generateAtlas } from '@/app/api/generate-atlas/route';
 import { cacheKeyForPrompt, hasSharedAtlasStore, loadGalleryAtlas } from '@/app/atlas-store';
-import { countActiveJobs, isActive, jobsAuthorized, readJob, usageOfBuilds, writeJob, type JobRecord } from '@/app/atlas-jobs';
+import { countActiveJobs, isActive, jobsAuthorized, pseudonym, readJob, usageOfBuilds, writeJob, type JobRecord } from '@/app/atlas-jobs';
 import { isBlockedKey, refusedSubject } from '@/app/blocked-atlases';
 
 export const runtime = 'nodejs';
@@ -42,11 +42,14 @@ export async function POST(request: Request) {
   const caller = typeof body.caller === 'string' && body.caller ? body.caller.slice(0, 120) : 'jtao';
   const session = typeof body.session === 'string' && body.session ? body.session.slice(0, 120) : undefined;
   const now = new Date().toISOString();
-  const job: JobRecord = { id, subject, state: 'queued', stage: 'cache', message: 'Starting', startedAt: now, updatedAt: now, caller, session, buildIds: [] };
+  // the stored record (public blob) carries pseudonyms only, never the raw user id
+  const callerPseudonym = pseudonym(caller);
+  const sessionPseudonym = session ? pseudonym(session) : undefined;
+  const job: JobRecord = { id, subject, state: 'queued', stage: 'cache', message: 'Starting', startedAt: now, updatedAt: now, caller: callerPseudonym, session: sessionPseudonym, buildIds: [] };
   await writeJob(job);
   const origin = new URL(request.url).origin;
   const callerAddress = `jobs-${createHash('sha256').update(caller).digest('hex').slice(0, 16)}`;
-  after(() => runJob(job, origin, callerAddress, `${caller}${session ? `:${session}` : ''}`.slice(0, 60)));
+  after(() => runJob(job, origin, callerAddress, `${callerPseudonym}${sessionPseudonym ? `:${sessionPseudonym}` : ''}`.slice(0, 60)));
   return NextResponse.json({ ...job, billable: true }, { status: 202 });
 }
 

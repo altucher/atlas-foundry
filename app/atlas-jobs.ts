@@ -2,7 +2,7 @@
 // progress; the job id IS the atlas cache key, so two callers asking for "pancake" share ONE build. The build itself is the normal /api/generate-atlas pipeline (draft, then enrich),
 // called in-process, so TAO-1 text, Chutes images and (when set) the OpenRouter exploded view, the ledger and the saved atlas all work exactly as for a browser visitor.
 // State lives in the shared blob store at <gallery>/_jobs/<key>.json. Auth: header x-atlas-jobs-key must equal ATLAS_JOBS_KEY (the caller is jtao's server, not a browser).
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 import { head, list, put } from '@vercel/blob';
 
@@ -157,4 +157,15 @@ export function billableUsage(records: UsageRecord[], opts: { explodedDelivered:
     undelivered: { builds: records.filter((r) => !DELIVERED.has(r.outcome)).map((r) => r.buildId), inputTokens: undeliveredLines.reduce((t, l) => t + l.inputTokens, 0), outputTokens: undeliveredLines.reduce((t, l) => t + l.outputTokens + l.reasoningTokens, 0), usd: Math.round(undeliveredLines.reduce((t, l) => t + (l.usd ?? 0), 0) * 1e6) / 1e6 },
     builds,
   };
+}
+
+
+/**
+ * PRIVACY (Master 10-13): job and usage records are stored as public blob URLs, so a person id next to the subject must never be written there. The caller and session ids are replaced by a
+ * keyed hash (HMAC-SHA256 with ATLAS_JOBS_KEY, 16 hex chars, 'h:' prefix): stable per person (rate limits and support can still match it) but not reversible and not guessable without the key.
+ */
+export function pseudonym(id: string, secret = process.env.ATLAS_JOBS_KEY ?? '') {
+  if (!id) return '';
+  if (!secret) return 'h:nokey';
+  return `h:${createHmac('sha256', secret).update(id).digest('hex').slice(0, 16)}`;
 }
