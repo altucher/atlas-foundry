@@ -104,8 +104,9 @@ async function runJob(job: JobRecord, origin: string, callerAddress: string, who
     // The suppliers pass and the exploded view run in their OWN function (own 800 s, not the 720 s left of this one): this function hands over and ends; the job stays 'enriching' until the tail finishes it
     job.tail = { state: 'queued', enrichmentPending, hasExploded: hasExploded0 };
     await update({ state: 'enriching', stage: enrichmentPending ? 'vendor' : 'render', message: enrichmentPending ? 'Finding the suppliers' : 'Drawing the exploded view' }, true);
-    const handoff = await fetch(`${origin}/api/atlas-jobs/${encodeURIComponent(job.id)}/tail`, { method: 'POST', headers: { 'x-atlas-jobs-key': process.env.ATLAS_JOBS_KEY ?? '', 'content-type': 'application/json' }, body: JSON.stringify({ callerAddress, who }) }).catch((error) => { console.warn('job tail not started', error); return null; });
-    if (!handoff || !handoff.ok) await runJobTail(job, { origin, callerAddress, who, capAt, enrichmentPending, hasExploded: hasExploded0 });
+    const handoff = await fetch(`${origin}/api/atlas-jobs/${encodeURIComponent(job.id)}/tail`, { method: 'POST', headers: { 'x-atlas-jobs-key': process.env.ATLAS_JOBS_KEY ?? '', 'content-type': 'application/json' }, body: JSON.stringify({ callerAddress, who, job }) }).catch((error) => { console.warn('job tail not started', error); return null; });
+    // only a 202 means the tail function took the job; anything else (stale answer, error, no answer) runs the tail here so the job is never left in 'enriching'
+    if (!handoff || handoff.status !== 202) await runJobTail(job, { origin, callerAddress, who, capAt, enrichmentPending, hasExploded: hasExploded0 });
   } catch (error) {
     console.error('atlas job failed', error);
     const usage = await usageOfBuilds(job.buildIds ?? []).catch(() => undefined);
