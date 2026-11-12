@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import AnalyticsClient from './analytics-client';
 import './globals.css';
+import { withBase } from './base-path';
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();
@@ -14,7 +15,7 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: base,
     title,
     description,
-    icons: { icon: '/favicon.svg', shortcut: '/favicon.svg' },
+    icons: { icon: withBase('/favicon.svg'), shortcut: withBase('/favicon.svg') },
     openGraph: { title, description, type: 'website', images: [{ url: new URL('/video/trailer-poster.jpg', base).toString(), width: 1280, height: 720, alt: 'Explode Anything interactive component catalog' }] },
     twitter: { card: 'summary_large_image', title, description, images: [new URL('/video/trailer-poster.jpg', base).toString()] },
   };

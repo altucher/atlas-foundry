@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { CURRENT_INTELLIGENCE_VERSION, TESLA_DEMO, type AtlasGalleryItem, type AtlasPart, type FoundryAtlas } from './foundry-data';
 import { trackAnalytics } from './analytics-client';
+import { withBase } from './base-path';
 
 const examples = ['data center', 'Falcon 9', 'Tesla', 'espresso machine', 'a male human body'];
 
@@ -249,7 +250,7 @@ export default function FoundryHome() {
 
   async function refreshGallery() {
     try {
-      const response = await fetch('/api/gallery', { cache: 'no-store' });
+      const response = await fetch(withBase('/api/gallery'), { cache: 'no-store' });
       const payload = await response.json() as { items?: AtlasGalleryItem[] };
       if (response.ok) setGallery(illustratedGalleryItems(payload.items ?? []));
     } catch {
@@ -260,7 +261,7 @@ export default function FoundryHome() {
   }
 
   useEffect(() => {
-    fetch('/api/gallery', { cache: 'no-store' })
+    fetch(withBase('/api/gallery'), { cache: 'no-store' })
       .then(async (response) => ({ response, payload: await response.json() as { items?: AtlasGalleryItem[] } }))
       .then(({ response, payload }) => {
         if (!response.ok) return;
@@ -352,7 +353,7 @@ export default function FoundryHome() {
     setGenerating(true);
     setBuildSubject(sharedSubject);
     setBuildJournal([{ stage: 'share', message: 'Opening the shared explosion from the gallery…' }]);
-    fetch(`/api/gallery?key=${encodeURIComponent(atlasKey)}`, { cache: 'no-store', signal: abortController.signal })
+    fetch(withBase(`/api/gallery?key=${encodeURIComponent(atlasKey)}`), { cache: 'no-store', signal: abortController.signal })
       .then(async (response) => ({ response, payload: await response.json() as { atlas?: FoundryAtlas; error?: string } }))
       .then(({ response, payload }) => {
         if (!response.ok || !payload.atlas || payload.atlas.cacheKey !== atlasKey) throw new Error(payload.error ?? 'This shared atlas is temporarily unavailable.');
@@ -441,7 +442,7 @@ export default function FoundryHome() {
       let resultStatus = 500;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          const response = await fetch('/api/generate-atlas', {
+          const response = await fetch(withBase('/api/generate-atlas'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
             body: JSON.stringify({ prompt: subject, phase: 'draft', recovery: attempt === 1 }),
@@ -486,7 +487,7 @@ export default function FoundryHome() {
       if (payload.enrichmentPending && payload.atlas.cacheKey) {
         setEnriching(true);
         setNotice('First draft ready. You can explore and use the explosion slider while detailed supplier and IP research continues.');
-        const enrichmentResponse = await fetch('/api/generate-atlas', {
+        const enrichmentResponse = await fetch(withBase('/api/generate-atlas'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/x-ndjson' },
           body: JSON.stringify({ prompt: subject, phase: 'enrich' }),
@@ -554,7 +555,7 @@ export default function FoundryHome() {
     trackAnalytics('gallery_open', { atlas: item.subject, cacheKey: item.cacheKey, source: 'shared' });
     requestAnimationFrame(() => workbenchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     try {
-      const response = await fetch(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`, { cache: 'no-store', signal: abortController.signal });
+      const response = await fetch(withBase(`/api/gallery?key=${encodeURIComponent(item.cacheKey)}`), { cache: 'no-store', signal: abortController.signal });
       const payload = await response.json() as { atlas?: FoundryAtlas; error?: string };
       if (requestId !== activeRequestRef.current) return;
       if (!response.ok || !payload.atlas) throw new Error(payload.error ?? 'That gallery atlas is temporarily unavailable.');
@@ -642,7 +643,7 @@ export default function FoundryHome() {
     trackAnalytics('query_submit', { query: subject });
     if (/\b(human|anatomy|bodyparts3d)\b/i.test(subject)) {
       trackAnalytics('atlas_result', { query: subject, atlas: 'Adult male anatomy', status: 'success', cached: true });
-      window.location.assign('/human');
+      window.location.assign(withBase('/human'));
       return;
     }
     if (/\btesla\b/i.test(subject)) {
@@ -700,7 +701,7 @@ export default function FoundryHome() {
         </div>
         <div className="foundry-gallery-track">
           <button type="button" className="foundry-gallery-card" title="Tesla electric vehicle" onClick={() => openCuratedAtlas(TESLA_DEMO, 'Loaded the curated cross-generation Tesla systems and supplier atlas.')}>
-            <span className="gallery-image"><img src="/tesla-exploded-v2.jpg" alt="Exploded Tesla systems atlas" /></span>
+            <span className="gallery-image"><img src={withBase('/tesla-exploded-v2.jpg')} alt="Exploded Tesla systems atlas" /></span>
             <span className="gallery-card-copy"><small>CURATED / ENGINEERED PRODUCT</small><strong>Tesla</strong><em>{TESLA_DEMO.parts.length} parts · {new Set(TESLA_DEMO.parts.flatMap((part) => (part.suppliers ?? []).map((supplier) => supplier.company))).size} vendors</em></span>
             <ChevronRight />
             <span className="gallery-full-title" role="tooltip">Tesla electric vehicle</span>
@@ -709,7 +710,7 @@ export default function FoundryHome() {
             <button type="button" className="foundry-gallery-card" key={item.cacheKey} title={item.subject} onClick={() => void openGalleryAtlas(item)} disabled={generating}>
               <span className={`gallery-image${item.imageOrientation === 'portrait' ? ' portrait' : ''}`}>
                 <img
-                  src={item.explodedImage}
+                  src={withBase(item.explodedImage)}
                   alt={`Exploded ${item.subject} atlas`}
                   loading="lazy"
                   decoding="async"
@@ -846,7 +847,7 @@ export default function FoundryHome() {
           >
             {atlas.image ? (
               <img
-                src={atlas.image}
+                src={withBase(atlas.image)}
                 alt={atlas.imageAlt ?? `Assembled ${atlas.subject}`}
                 loading="eager"
                 decoding="async"
@@ -875,7 +876,7 @@ export default function FoundryHome() {
             >
               <img
                 className="foundry-exploded-base"
-                src={atlas.explodedImage}
+                src={withBase(atlas.explodedImage)}
                 alt={atlas.explodedImageAlt ?? `Conceptual exploded view of ${atlas.subject}`}
                 loading="eager"
                 decoding="async"
@@ -931,7 +932,7 @@ export default function FoundryHome() {
                           transformOrigin: `${region.x}% ${region.y}%`,
                         }}
                       >
-                        <img src={atlas.explodedImage} alt="" loading="lazy" decoding="async" fetchPriority="low" />
+                        <img src={withBase(atlas.explodedImage)} alt="" loading="lazy" decoding="async" fetchPriority="low" />
                       </div>
                     );
                   });

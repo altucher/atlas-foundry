@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 
 import { adminCookieName, analyticsConfigured, readAnalyticsEvents, validAdminCookie, type AnalyticsEvent } from '@/app/analytics';
+import { withBase } from '../base-path';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,7 +42,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
           <span>EXPLODE ANYTHING / PRIVATE</span>
           <h1>Analytics access</h1>
           <p>{analyticsConfigured() ? 'Enter the private admin password to view visitor behavior and research demand.' : 'Analytics is locked until ANALYTICS_ADMIN_PASSWORD is configured on the server.'}</p>
-          <form action="/api/analytics/login" method="post">
+          <form action={withBase('/api/analytics/login')} method="post">
             <label htmlFor="analytics-password">Admin password</label>
             <input id="analytics-password" name="password" type="password" autoComplete="current-password" required disabled={!analyticsConfigured()} />
             {query.error ? <small>That password was not accepted.</small> : null}
@@ -84,7 +85,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     <main className="analytics-shell" data-analytics-private="true">
       <header className="analytics-head">
         <div><span>EXPLODE ANYTHING / PRIVATE</span><h1>Audience intelligence</h1><p>Anonymous product usage, research demand, and interaction behavior.</p></div>
-        <div className="analytics-actions"><Link href="/">Open site</Link><form action="/api/analytics/logout" method="post"><button type="submit">Sign out</button></form></div>
+        <div className="analytics-actions"><Link href="/">Open site</Link><form action={withBase('/api/analytics/logout')} method="post"><button type="submit">Sign out</button></form></div>
       </header>
 
       <nav className="analytics-range" aria-label="Analytics date range">

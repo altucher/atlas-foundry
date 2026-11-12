@@ -36,6 +36,7 @@ import {
   type SystemId,
   type View,
 } from '../anatomy';
+import { withBase } from '../base-path';
 
 type Panel = 'systems' | 'search' | 'about' | null;
 type SearchResult = {
@@ -88,7 +89,7 @@ export default function Home() {
 
   useEffect(() => {
     const abort = new AbortController();
-    fetch('/models/atlas.json', { signal: abort.signal })
+    fetch(withBase('/models/atlas.json'), { signal: abort.signal })
       .then((response) => {
         if (!response.ok) throw new Error('The anatomy catalog could not be loaded.');
         return response.json();
@@ -240,7 +241,7 @@ export default function Home() {
   };
 
   const shareAnatomy = async (method: 'copy' | 'native') => {
-    const url = new URL('/human', window.location.origin);
+    const url = new URL(withBase('/human'), window.location.origin);
     url.searchParams.set('explode', String(Math.round(state.explode * 100)));
     url.searchParams.set('visible', state.visible.join(','));
     url.searchParams.set('view', state.view);

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
+import { withBase } from './base-path';
 
 export type AnalyticsProperties = Record<string, string | number | boolean | null | undefined>;
 
@@ -25,7 +26,7 @@ export function trackAnalytics(event: string, properties: AnalyticsProperties = 
       viewport: window.innerWidth < 760 ? 'mobile' : window.innerWidth < 1100 ? 'tablet' : 'desktop',
     },
   });
-  void fetch('/api/analytics/track', {
+  void fetch(withBase('/api/analytics/track'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: payload,
